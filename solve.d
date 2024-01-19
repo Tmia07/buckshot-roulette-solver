@@ -51,7 +51,7 @@ void switchTurn(ref Game game)
 		game.handcuffs[game.currentTurn] = HandcuffState.none;
 }
 
-enum Move
+enum Move : ubyte
 {
 	shootSelf,
 	shootOther,
@@ -71,12 +71,15 @@ struct SearchResult
 {
 	Score score;
 	Move bestMove;
+	bool initialized = true;
 }
 
 SearchResult[Game] searchCache;
 SearchResult search(const ref Game game)
 {
-	return searchCache.require(game, searchImpl(game));
+	auto result = searchCache.require(game, searchImpl(game));
+	assert(result.initialized, "Infinite recursion");
+	return result;
 }
 
 SearchResult searchImpl(const ref Game game)
@@ -183,8 +186,9 @@ SearchResult searchImpl(const ref Game game)
 		// Refill magazine. TODO: better distribution, or even iterate?
 		Game newGame = game;
 		newGame.rounds[] = 2;
-		// Give some items. Random distribution would probably be too slow. Just pretend to give everyone a pack of smokes.
-		newGame.health[] += 1;
+		// Give some items. Random distribution would probably be too slow.
+		foreach (character; Character.init .. enumLength!Character)
+			newGame.items[character][Item.lookingGlass]++;
 		return search(newGame);
 	}
 
