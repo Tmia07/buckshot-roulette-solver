@@ -200,6 +200,8 @@ SearchResult searchImpl(const ref Game game)
 		// Give some items. Random distribution would probably be too slow.
 		foreach (character; Character.init .. enumLength!Character)
 			newGame.items[character][Item.lookingGlass]++;
+		// It's always the player's turn first.
+		newGame.currentTurn = Character.player;
 		return search(newGame);
 	}
 
