@@ -17,18 +17,26 @@ enum RoundType
 	live,
 }
 
+enum Item
+{
+	handcuffs,
+}
+
 struct Game
 {
 	Character currentTurn;
-	int[enumLength!RoundType] rounds;
+	byte[enumLength!RoundType] rounds;
 	@property uint totalRounds() const { return rounds[].sum; }
-	int[enumLength!Character] health;
+	byte[enumLength!Item][enumLength!Character] items;
+	byte[enumLength!Character] health;
+	byte[enumLength!Character] handcuffs;
 }
 
 enum Move
 {
 	shootSelf,
 	shootOther,
+	useHandcuffs,
 }
 
 alias Score = double;
@@ -87,13 +95,37 @@ SearchResult search(const ref Game game)
 		return totalScore;
 	}
 
+	Score use(Item item)
+	{
+		if (!game.items[game.currentTurn][item])
+			return Score.nan;
+		Game newGame = game;
+		newGame.items[game.currentTurn][item]--;
+		final switch (item)
+		{
+			case Item.handcuffs:
+				newGame.handcuffs[newGame.currentTurn.other]++;
+				break;
+		}
+		return search(newGame).score;
+	}
+
 	Score tryMove(Move move)
 	{
 		final switch (move)
 		{
 			case Move.shootSelf : return shoot(game.currentTurn);
 			case Move.shootOther: return shoot(game.currentTurn.other);
+			case Move.useHandcuffs: return use(Item.handcuffs);
 		}
+	}
+
+	if (game.handcuffs[game.currentTurn])
+	{
+		Game newGame = game;
+		newGame.handcuffs[game.currentTurn]--;
+		newGame.currentTurn = newGame.currentTurn.other;
+		return search(newGame);
 	}
 
 	final switch (game.currentTurn)
