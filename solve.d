@@ -66,10 +66,6 @@ enum Move : ubyte
 
 alias Score = double;
 
-enum loseScore = 0;
-enum winScore = 1;
-enum healthScoreBonus = 0.1;
-
 struct SearchResult
 {
 	Score score;
@@ -134,9 +130,9 @@ SearchResult searchImpl(const ref Game game)
 						final switch (whom)
 						{
 							case Character.player:
-								return loseScore;
+								return 0;
 							case Character.dealer:
-								return winScore + newGame.health[Character.player] * healthScoreBonus;
+								return 1;
 						}
 					newGame.switchTurn();
 					break;
