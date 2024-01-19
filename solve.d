@@ -26,6 +26,13 @@ enum Item
 	cigarettePack,
 }
 
+enum HandcuffState
+{
+	none,
+	willBreak,
+	willSkip,
+}
+
 struct Game
 {
 	Character currentTurn;
@@ -33,8 +40,15 @@ struct Game
 	@property uint totalRounds() const { return rounds[].sum; }
 	byte[enumLength!Item][enumLength!Character] items;
 	byte[enumLength!Character] health;
-	byte[enumLength!Character] handcuffs;
+	HandcuffState[enumLength!Character] handcuffs;
 	Nullable!RoundType nextRound;
+}
+
+void switchTurn(ref Game game)
+{
+	game.currentTurn = game.currentTurn.other;
+	if (game.handcuffs[game.currentTurn] == HandcuffState.willBreak)
+		game.handcuffs[game.currentTurn] = HandcuffState.none;
 }
 
 enum Move
@@ -100,7 +114,7 @@ SearchResult searchImpl(const ref Game game)
 				case RoundType.blank:
 					// If the shotgun was aimed at the other player, switch turns
 					if (whom != newGame.currentTurn)
-						newGame.currentTurn = newGame.currentTurn.other;
+						newGame.switchTurn();
 					break;
 				case RoundType.live:
 					newGame.health[whom]--;
@@ -112,7 +126,7 @@ SearchResult searchImpl(const ref Game game)
 							case Character.dealer:
 								return winScore + newGame.health[Character.player] * healthScoreBonus;
 						}
-					newGame.currentTurn = newGame.currentTurn.other;
+					newGame.switchTurn();
 					break;
 			}
 			return search(newGame).score;
@@ -128,7 +142,9 @@ SearchResult searchImpl(const ref Game game)
 		final switch (item)
 		{
 			case Item.handcuffs:
-				newGame.handcuffs[newGame.currentTurn.other]++;
+				if (newGame.handcuffs[newGame.currentTurn.other])
+					return Score.nan;
+				newGame.handcuffs[newGame.currentTurn.other] = HandcuffState.willSkip;
 				return search(newGame).score;
 			case Item.lookingGlass:
 				if (!newGame.nextRound.isNull)
@@ -163,17 +179,20 @@ SearchResult searchImpl(const ref Game game)
 
 	if (game.totalRounds == 0)
 	{
+		// End of round.
 		// Refill magazine. TODO: better distribution, or even iterate?
 		Game newGame = game;
 		newGame.rounds[] = 2;
+		// Give some items. Random distribution would probably be too slow. Just pretend to give everyone a pack of smokes.
+		newGame.health[] += 1;
 		return search(newGame);
 	}
 
-	if (game.handcuffs[game.currentTurn])
+	if (game.handcuffs[game.currentTurn] == HandcuffState.willSkip)
 	{
 		Game newGame = game;
-		newGame.handcuffs[game.currentTurn]--;
-		newGame.currentTurn = newGame.currentTurn.other;
+		newGame.handcuffs[game.currentTurn] = HandcuffState.willBreak;
+		newGame.switchTurn();
 		return search(newGame);
 	}
 
