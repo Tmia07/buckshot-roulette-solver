@@ -167,7 +167,8 @@ SearchResult searchImpl(const ref Game game)
 					return search(newGame).score;
 				});
 			case Item.cigarettePack:
-				newGame.health[game.currentTurn]++;
+				if (newGame.health[game.currentTurn] < maxHealth)
+					newGame.health[game.currentTurn]++;
 				return search(newGame).score;
 			case Item.handSaw:
 				if (newGame.shotgunSawedOff)
@@ -238,6 +239,8 @@ SearchResult searchImpl(const ref Game game)
 			return worstResult;
 	}
 }
+
+enum maxHealth = 3; // depends on current act
 
 void main()
 {
