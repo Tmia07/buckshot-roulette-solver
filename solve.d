@@ -1,5 +1,6 @@
 import std.algorithm.iteration;
 import std.stdio;
+import std.typecons;
 
 import ae.utils.meta;
 
@@ -19,6 +20,7 @@ enum RoundType
 
 enum Item
 {
+	lookingGlass,
 	handcuffs,
 }
 
@@ -30,12 +32,14 @@ struct Game
 	byte[enumLength!Item][enumLength!Character] items;
 	byte[enumLength!Character] health;
 	byte[enumLength!Character] handcuffs;
+	Nullable!RoundType nextRound;
 }
 
 enum Move
 {
 	shootSelf,
 	shootOther,
+	useLookingGlass,
 	useHandcuffs,
 }
 
@@ -53,8 +57,16 @@ struct SearchResult
 
 SearchResult search(const ref Game game)
 {
-	Score shoot(Character whom)
+	Score resolveRound(const ref Game game, scope Score delegate(RoundType roundType, ref Game newGame) handler)
 	{
+		if (!game.nextRound.isNull)
+		{
+			Game newGame = game;
+			auto roundType = newGame.nextRound.get();
+			newGame.nextRound.nullify();
+			return handler(roundType, newGame);
+		}
+
 		Score totalScore = 0;
 		foreach (roundType; RoundType.init .. enumLength!RoundType)
 			if (game.rounds[roundType])
@@ -62,37 +74,39 @@ SearchResult search(const ref Game game)
 				auto score = {
 					Game newGame = game;
 					newGame.rounds[roundType]--;
-					final switch (roundType)
-					{
-						case RoundType.blank:
-							// If the shotgun was aimed at the other player, switch turns
-							if (whom != newGame.currentTurn)
-								newGame.currentTurn = newGame.currentTurn.other;
-							break;
-						case RoundType.live:
-							newGame.health[whom]--;
-							if (newGame.health[whom] <= 0)
-								final switch (whom)
-								{
-									case Character.player:
-										return loseScore;
-									case Character.dealer:
-										return winScore + newGame.health[Character.player] * healthScoreBonus;
-								}
-							newGame.currentTurn = newGame.currentTurn.other;
-							break;
-					}
-					if (newGame.totalRounds == 0)
-					{
-						// Refill magazine. TODO: better distribution, or even iterate?
-						newGame.rounds[] = 2;
-					}
-					return search(newGame).score;
+					return handler(roundType, newGame);
 				}();
 				auto prob = double(game.rounds[roundType]) / game.totalRounds;
 				totalScore += score * prob;
 			}
 		return totalScore;
+	}
+
+	Score shoot(Character whom)
+	{
+		return resolveRound(game, (RoundType roundType, ref Game newGame) {
+			final switch (roundType)
+			{
+				case RoundType.blank:
+					// If the shotgun was aimed at the other player, switch turns
+					if (whom != newGame.currentTurn)
+						newGame.currentTurn = newGame.currentTurn.other;
+					break;
+				case RoundType.live:
+					newGame.health[whom]--;
+					if (newGame.health[whom] <= 0)
+						final switch (whom)
+						{
+							case Character.player:
+								return loseScore;
+							case Character.dealer:
+								return winScore + newGame.health[Character.player] * healthScoreBonus;
+						}
+					newGame.currentTurn = newGame.currentTurn.other;
+					break;
+			}
+			return search(newGame).score;
+		});
 	}
 
 	Score use(Item item)
@@ -105,9 +119,15 @@ SearchResult search(const ref Game game)
 		{
 			case Item.handcuffs:
 				newGame.handcuffs[newGame.currentTurn.other]++;
-				break;
+				return search(newGame).score;
+			case Item.lookingGlass:
+				if (!newGame.nextRound.isNull)
+					return Score.nan;
+				return resolveRound(newGame, (RoundType roundType, ref Game newGame) {
+					newGame.nextRound = roundType;
+					return search(newGame).score;
+				});
 		}
-		return search(newGame).score;
 	}
 
 	Score tryMove(Move move)
@@ -116,8 +136,17 @@ SearchResult search(const ref Game game)
 		{
 			case Move.shootSelf : return shoot(game.currentTurn);
 			case Move.shootOther: return shoot(game.currentTurn.other);
+			case Move.useLookingGlass: return use(Item.lookingGlass);
 			case Move.useHandcuffs: return use(Item.handcuffs);
 		}
+	}
+
+	if (game.totalRounds == 0)
+	{
+		// Refill magazine. TODO: better distribution, or even iterate?
+		Game newGame = game;
+		newGame.rounds[] = 2;
+		return search(newGame);
 	}
 
 	if (game.handcuffs[game.currentTurn])
