@@ -12,7 +12,7 @@ enum Character
 
 Character other(Character character) { return cast(Character)(1 - character); }
 
-enum RoundType
+enum RoundType : ubyte
 {
 	blank,
 	live,
@@ -24,6 +24,7 @@ enum Item
 	handcuffs,
 	beer,
 	cigarettePack,
+	handSaw,
 }
 
 enum HandcuffState
@@ -42,6 +43,7 @@ struct Game
 	byte[enumLength!Character] health;
 	HandcuffState[enumLength!Character] handcuffs;
 	Nullable!RoundType nextRound;
+	bool shotgunSawedOff;
 }
 
 void switchTurn(ref Game game)
@@ -59,6 +61,7 @@ enum Move : ubyte
 	useHandcuffs,
 	useBeer,
 	useCigarettePack,
+	useHandSaw,
 }
 
 alias Score = double;
@@ -112,6 +115,12 @@ SearchResult searchImpl(const ref Game game)
 	Score shoot(Character whom)
 	{
 		return resolveRound(game, (RoundType roundType, ref Game newGame) {
+			auto damage = 1;
+			if (newGame.shotgunSawedOff)
+			{
+				damage = 2;
+				newGame.shotgunSawedOff = false;
+			}
 			final switch (roundType)
 			{
 				case RoundType.blank:
@@ -120,7 +129,7 @@ SearchResult searchImpl(const ref Game game)
 						newGame.switchTurn();
 					break;
 				case RoundType.live:
-					newGame.health[whom]--;
+					newGame.health[whom] -= damage;
 					if (newGame.health[whom] <= 0)
 						final switch (whom)
 						{
@@ -164,6 +173,11 @@ SearchResult searchImpl(const ref Game game)
 			case Item.cigarettePack:
 				newGame.health[game.currentTurn]++;
 				return search(newGame).score;
+			case Item.handSaw:
+				if (newGame.shotgunSawedOff)
+					return Score.nan;
+				newGame.shotgunSawedOff = true;
+				return search(newGame).score;
 		}
 	}
 
@@ -177,6 +191,7 @@ SearchResult searchImpl(const ref Game game)
 			case Move.useHandcuffs: return use(Item.handcuffs);
 			case Move.useBeer: return use(Item.beer);
 			case Move.useCigarettePack: return use(Item.cigarettePack);
+			case Move.useHandSaw: return use(Item.handSaw);
 		}
 	}
 
