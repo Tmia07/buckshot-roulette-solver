@@ -23,6 +23,7 @@ enum Item
 	lookingGlass,
 	handcuffs,
 	beer,
+	cigarettePack,
 }
 
 struct Game
@@ -43,6 +44,7 @@ enum Move
 	useLookingGlass,
 	useHandcuffs,
 	useBeer,
+	useCigarettePack,
 }
 
 alias Score = double;
@@ -140,6 +142,9 @@ SearchResult searchImpl(const ref Game game)
 					cast(void)roundType; // CAST IT INTO THE VOID
 					return search(newGame).score;
 				});
+			case Item.cigarettePack:
+				newGame.health[game.currentTurn]++;
+				return search(newGame).score;
 		}
 	}
 
@@ -152,6 +157,7 @@ SearchResult searchImpl(const ref Game game)
 			case Move.useLookingGlass: return use(Item.lookingGlass);
 			case Move.useHandcuffs: return use(Item.handcuffs);
 			case Move.useBeer: return use(Item.beer);
+			case Move.useCigarettePack: return use(Item.cigarettePack);
 		}
 	}
 
