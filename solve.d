@@ -57,7 +57,13 @@ struct SearchResult
 	Move bestMove;
 }
 
+SearchResult[Game] searchCache;
 SearchResult search(const ref Game game)
+{
+	return searchCache.require(game, searchImpl(game));
+}
+
+SearchResult searchImpl(const ref Game game)
 {
 	Score resolveRound(const ref Game game, scope Score delegate(RoundType roundType, ref Game newGame) handler)
 	{
