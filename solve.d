@@ -1,3 +1,4 @@
+import std.algorithm.comparison;
 import std.algorithm.iteration;
 import std.stdio;
 import std.typecons;
@@ -228,15 +229,80 @@ SearchResult searchImpl(const ref Game game)
 			return bestResult;
 
 		case Character.dealer:
-			// Assume that the dealer will proceed according to what's worst for the player.
-			auto worstResult = SearchResult(Score.infinity);
-			foreach (move; Move.init .. enumLength!Move)
+			static if (false)
 			{
-				auto score = tryMove(move);
-				if (score < worstResult.score)
-					worstResult = SearchResult(score, move);
+				// Assume that the dealer will proceed according to what's worst for the player.
+				auto worstResult = SearchResult(Score.infinity);
+				foreach (move; Move.init .. enumLength!Move)
+				{
+					auto score = tryMove(move);
+					if (score < worstResult.score)
+						worstResult = SearchResult(score, move);
+				}
+				return worstResult;
 			}
-			return worstResult;
+			else
+			{
+				SearchResult dealerMove(Move move) { return SearchResult(tryMove(move), move); }
+				static Score randomChoice(scope Score[] options...) { return options.sum / options.length; }
+				static Score worstChoice(scope Score[] options...) { return options.reduce!min; }
+
+				// Simulate game AI
+				Nullable!Character dealerTarget;
+				Nullable!RoundType knownShell;
+				bool dealerKnowsShell;
+
+				if (!game.nextRound.isNull)
+				{
+					// If it's resolved, it's guaranteed that the current character knows it
+					dealerKnowsShell = true;
+					knownShell = game.nextRound;
+				}
+
+				if (game.totalRounds == 1)
+				{
+					knownShell = game.rounds[RoundType.live]
+						? RoundType.live
+						: RoundType.blank;
+					dealerTarget = knownShell.get() == RoundType.live
+						? Character.player
+						: Character.dealer;
+					dealerKnowsShell = true;
+				}
+
+				// The real AI actually iterates over items using a hidden internal order
+				// (order that items were acquired).
+				// To be safe, assume an order which is most inconvenient for us.
+				Score[enumLength!Item] itemOptions; size_t numItemOptions;
+				if (game.items[game.currentTurn][Item.lookingGlass] && !dealerKnowsShell && game.totalRounds != 1)
+					itemOptions[numItemOptions++] = tryMove(Move.useLookingGlass);
+				if (game.items[game.currentTurn][Item.cigarettePack] && game.health[game.currentTurn] < maxHealth)
+					itemOptions[numItemOptions++] = tryMove(Move.useCigarettePack);
+				if (game.items[game.currentTurn][Item.beer] && knownShell != RoundType.live.nullable && game.totalRounds != 1)
+					itemOptions[numItemOptions++] = tryMove(Move.useBeer);
+				if (game.items[game.currentTurn][Item.handcuffs] && game.handcuffs[game.currentTurn.other] == HandcuffState.none && game.totalRounds != 1)
+					itemOptions[numItemOptions++] = tryMove(Move.useHandcuffs);
+				if (game.items[game.currentTurn][Item.handSaw] && !game.shotgunSawedOff && knownShell == RoundType.live.nullable)
+					itemOptions[numItemOptions++] = tryMove(Move.useHandSaw);
+				if (numItemOptions)
+					return worstChoice(itemOptions[0 .. numItemOptions]).SearchResult;
+
+				if (game.items[game.currentTurn][Item.handSaw] && !game.shotgunSawedOff && knownShell != nullable(RoundType.blank))
+					return randomChoice(
+						tryMove(Move.shootSelf),
+						tryMove(Move.useHandSaw),
+					).SearchResult;
+
+				if (dealerTarget.isNull)
+					return randomChoice(
+						tryMove(Move.shootSelf),
+						tryMove(Move.shootOther),
+					).SearchResult;
+				else
+					return dealerMove(
+						dealerTarget.get() == Character.dealer ? Move.shootSelf : Move.shootOther
+					);
+			}
 	}
 }
 
