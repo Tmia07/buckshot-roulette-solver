@@ -199,6 +199,8 @@ SearchResult searchImpl(const ref Game game)
 		// Refill magazine. TODO: better distribution, or even iterate?
 		Game newGame = game;
 		newGame.rounds[] = 2;
+		// Handcuffs come off. How will you grab the items otherwise?
+		newGame.handcuffs[] = HandcuffState.none;
 		// Give some items. Random distribution would probably be too slow.
 		foreach (character; Character.init .. enumLength!Character)
 			newGame.items[character][Item.lookingGlass]++;
