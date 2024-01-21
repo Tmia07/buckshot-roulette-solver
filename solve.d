@@ -39,7 +39,7 @@ struct Game
 {
 	Character currentTurn;
 	byte[enumLength!RoundType] rounds;
-	@property uint totalRounds() const { return rounds[].sum; }
+	@property uint totalRounds() const { return rounds[].sum + (nextRound.isNull ? 0 : 1); }
 	byte[enumLength!Item][enumLength!Character] items;
 	byte[enumLength!Character] health;
 	HandcuffState[enumLength!Character] handcuffs;
