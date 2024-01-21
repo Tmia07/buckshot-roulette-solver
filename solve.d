@@ -5,47 +5,7 @@ import std.typecons;
 
 import ae.utils.meta;
 
-enum Character
-{
-	player,
-	dealer,
-}
-
-Character other(Character character) { return cast(Character)(1 - character); }
-
-enum RoundType : ubyte
-{
-	blank,
-	live,
-}
-
-enum Item
-{
-	lookingGlass,
-	handcuffs,
-	beer,
-	cigarettePack,
-	handSaw,
-}
-
-enum HandcuffState
-{
-	none,
-	willBreak,
-	willSkip,
-}
-
-struct Game
-{
-	Character currentTurn;
-	byte[enumLength!RoundType] rounds;
-	@property uint totalRounds() const { return rounds[].sum + (nextRound.isNull ? 0 : 1); }
-	byte[enumLength!Item][enumLength!Character] items;
-	byte[enumLength!Character] health;
-	HandcuffState[enumLength!Character] handcuffs;
-	Nullable!RoundType nextRound;
-	bool shotgunSawedOff;
-}
+import game;
 
 void switchTurn(ref Game game)
 {
@@ -84,26 +44,26 @@ SearchResult search(const ref Game game)
 
 SearchResult searchImpl(const ref Game game)
 {
-	Score resolveRound(const ref Game game, scope Score delegate(RoundType roundType, ref Game newGame) handler)
+	Score resolveRound(const ref Game game, scope Score delegate(ShellType shellType, ref Game newGame) handler)
 	{
-		if (!game.nextRound.isNull)
+		if (!game.nextShell.isNull)
 		{
 			Game newGame = game;
-			auto roundType = newGame.nextRound.get();
-			newGame.nextRound.nullify();
-			return handler(roundType, newGame);
+			auto shellType = newGame.nextShell.get();
+			newGame.nextShell.nullify();
+			return handler(shellType, newGame);
 		}
 
 		Score totalScore = 0;
-		foreach (roundType; RoundType.init .. enumLength!RoundType)
-			if (game.rounds[roundType])
+		foreach (shellType; ShellType.init .. enumLength!ShellType)
+			if (game.shells[shellType])
 			{
 				auto score = {
 					Game newGame = game;
-					newGame.rounds[roundType]--;
-					return handler(roundType, newGame);
+					newGame.shells[shellType]--;
+					return handler(shellType, newGame);
 				}();
-				auto prob = double(game.rounds[roundType]) / game.totalRounds;
+				auto prob = double(game.shells[shellType]) / game.totalShells;
 				totalScore += score * prob;
 			}
 		return totalScore;
@@ -111,21 +71,21 @@ SearchResult searchImpl(const ref Game game)
 
 	Score shoot(Character whom)
 	{
-		return resolveRound(game, (RoundType roundType, ref Game newGame) {
+		return resolveRound(game, (ShellType shellType, ref Game newGame) {
 			auto damage = 1;
 			if (newGame.shotgunSawedOff)
 			{
 				damage = 2;
 				newGame.shotgunSawedOff = false;
 			}
-			final switch (roundType)
+			final switch (shellType)
 			{
-				case RoundType.blank:
+				case ShellType.blank:
 					// If the shotgun was aimed at the other player, switch turns
 					if (whom != newGame.currentTurn)
 						newGame.switchTurn();
 					break;
-				case RoundType.live:
+				case ShellType.live:
 					newGame.health[whom] -= damage;
 					if (newGame.health[whom] <= 0)
 						final switch (whom)
@@ -156,15 +116,15 @@ SearchResult searchImpl(const ref Game game)
 				newGame.handcuffs[newGame.currentTurn.other] = HandcuffState.willSkip;
 				return search(newGame).score;
 			case Item.lookingGlass:
-				if (!newGame.nextRound.isNull)
+				if (!newGame.nextShell.isNull)
 					return Score.nan;
-				return resolveRound(newGame, (RoundType roundType, ref Game newGame) {
-					newGame.nextRound = roundType;
+				return resolveRound(newGame, (ShellType shellType, ref Game newGame) {
+					newGame.nextShell = shellType;
 					return search(newGame).score;
 				});
 			case Item.beer:
-				return resolveRound(newGame, (RoundType roundType, ref Game newGame) {
-					cast(void)roundType; // CAST IT INTO THE VOID
+				return resolveRound(newGame, (ShellType shellType, ref Game newGame) {
+					cast(void)shellType; // CAST IT INTO THE VOID
 					return search(newGame).score;
 				});
 			case Item.cigarettePack:
@@ -193,12 +153,12 @@ SearchResult searchImpl(const ref Game game)
 		}
 	}
 
-	if (game.totalRounds == 0)
+	if (game.totalShells == 0)
 	{
 		// End of round.
 		// Refill magazine. TODO: better distribution, or even iterate?
 		Game newGame = game;
-		newGame.rounds[] = 2;
+		newGame.shells[] = 2;
 		// Handcuffs come off. How will you grab the items otherwise?
 		newGame.handcuffs[] = HandcuffState.none;
 		// Give some items. Random distribution would probably be too slow.
@@ -251,25 +211,25 @@ SearchResult searchImpl(const ref Game game)
 
 				// Simulate game AI
 				Nullable!Character dealerTarget;
-				Nullable!RoundType knownShell;
+				Nullable!ShellType knownShell;
 				bool dealerKnowsShell;
 
-				if (!game.nextRound.isNull)
+				if (!game.nextShell.isNull)
 				{
 					// If it's resolved, it's guaranteed that the current character knows it
-					knownShell = game.nextRound;
-					dealerTarget = knownShell.get() == RoundType.live
+					knownShell = game.nextShell;
+					dealerTarget = knownShell.get() == ShellType.live
 						? Character.player
 						: Character.dealer;
 					dealerKnowsShell = true;
 				}
 
-				if (game.totalRounds == 1)
+				if (game.totalShells == 1)
 				{
-					knownShell = game.rounds[RoundType.live]
-						? RoundType.live
-						: RoundType.blank;
-					dealerTarget = knownShell.get() == RoundType.live
+					knownShell = game.shells[ShellType.live]
+						? ShellType.live
+						: ShellType.blank;
+					dealerTarget = knownShell.get() == ShellType.live
 						? Character.player
 						: Character.dealer;
 					dealerKnowsShell = true;
@@ -279,20 +239,20 @@ SearchResult searchImpl(const ref Game game)
 				// (order that items were acquired).
 				// To be safe, assume an order which is most inconvenient for us.
 				Score[enumLength!Item] itemOptions; size_t numItemOptions;
-				if (game.items[game.currentTurn][Item.lookingGlass] && !dealerKnowsShell && game.totalRounds != 1)
+				if (game.items[game.currentTurn][Item.lookingGlass] && !dealerKnowsShell && game.totalShells != 1)
 					itemOptions[numItemOptions++] = tryMove(Move.useLookingGlass);
 				if (game.items[game.currentTurn][Item.cigarettePack] && game.health[game.currentTurn] < maxHealth)
 					itemOptions[numItemOptions++] = tryMove(Move.useCigarettePack);
-				if (game.items[game.currentTurn][Item.beer] && knownShell != RoundType.live.nullable && game.totalRounds != 1)
+				if (game.items[game.currentTurn][Item.beer] && knownShell != ShellType.live.nullable && game.totalShells != 1)
 					itemOptions[numItemOptions++] = tryMove(Move.useBeer);
-				if (game.items[game.currentTurn][Item.handcuffs] && game.handcuffs[game.currentTurn.other] == HandcuffState.none && game.totalRounds != 1)
+				if (game.items[game.currentTurn][Item.handcuffs] && game.handcuffs[game.currentTurn.other] == HandcuffState.none && game.totalShells != 1)
 					itemOptions[numItemOptions++] = tryMove(Move.useHandcuffs);
-				if (game.items[game.currentTurn][Item.handSaw] && !game.shotgunSawedOff && knownShell == RoundType.live.nullable)
+				if (game.items[game.currentTurn][Item.handSaw] && !game.shotgunSawedOff && knownShell == ShellType.live.nullable)
 					itemOptions[numItemOptions++] = tryMove(Move.useHandSaw);
 				if (numItemOptions)
 					return worstChoice(itemOptions[0 .. numItemOptions]).SearchResult;
 
-				if (game.items[game.currentTurn][Item.handSaw] && !game.shotgunSawedOff && knownShell != nullable(RoundType.blank))
+				if (game.items[game.currentTurn][Item.handSaw] && !game.shotgunSawedOff && knownShell != nullable(ShellType.blank))
 					return randomChoice(
 						tryMove(Move.shootSelf),
 						tryMove(Move.useHandSaw),
@@ -317,10 +277,28 @@ void main()
 {
 	Game game;
 	game.currentTurn = Character.player;
-	game.rounds[RoundType.blank] = 2;
-	game.rounds[RoundType.live] = 1;
-	game.health[Character.player] = 2;
+	game.shells[ShellType.live ] = 1;
+	game.shells[ShellType.blank] = 1;
+	// game.nextShell = ShellType.live;
+
 	game.health[Character.dealer] = 2;
+	game.health[Character.player] = 2;
+
+	game.items[Character.player][Item.lookingGlass ] = 0;
+	game.items[Character.player][Item.handcuffs    ] = 0;
+	game.items[Character.player][Item.beer         ] = 0;
+	game.items[Character.player][Item.cigarettePack] = 0;
+	game.items[Character.player][Item.handSaw      ] = 0;
+
+	game.items[Character.dealer][Item.lookingGlass ] = 0;
+	game.items[Character.dealer][Item.handcuffs    ] = 0;
+	game.items[Character.dealer][Item.beer         ] = 0;
+	game.items[Character.dealer][Item.cigarettePack] = 0;
+	game.items[Character.dealer][Item.handSaw      ] = 0;
+
+	// game.handcuffs[Character.dealer] = HandcuffState.willSkip;
+	// game.handcuffs[Character.dealer] = HandcuffState.willBreak;
+	// game.shotgunSawedOff = true;
 
 	writeln(search(game));
 }
