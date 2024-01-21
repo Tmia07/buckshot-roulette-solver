@@ -257,8 +257,11 @@ SearchResult searchImpl(const ref Game game)
 				if (!game.nextRound.isNull)
 				{
 					// If it's resolved, it's guaranteed that the current character knows it
-					dealerKnowsShell = true;
 					knownShell = game.nextRound;
+					dealerTarget = knownShell.get() == RoundType.live
+						? Character.player
+						: Character.dealer;
+					dealerKnowsShell = true;
 				}
 
 				if (game.totalRounds == 1)
