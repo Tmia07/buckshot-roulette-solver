@@ -1,5 +1,7 @@
 import std.algorithm.comparison;
 import std.algorithm.iteration;
+import std.algorithm.sorting;
+import std.array : join;
 import std.conv : to;
 import std.math.traits;
 import std.stdio;
@@ -7,6 +9,7 @@ import std.string : capitalize;
 import std.traits;
 import std.typecons;
 
+import ae.utils.math.combinatorics;
 import ae.utils.meta;
 
 import game;
@@ -299,56 +302,95 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 					ChoiceMode.random,
 					() => "How many items are granted?",
 					(numItems) {
-						Score grantItems(ref const State state3, ubyte[enumLength!Character] numRemaining)
+						Score grantItems(ref const State state3, Character character)
 						{
-							foreach (character; Character.init .. enumLength!Character)
-								if (numRemaining[character])
-								{
-									if (state3.totalItems(character) == maxItems)
-									{
-										driver.log(() => (character == Character.player ? "You don't" : "The dealer doesn't") ~ " have any more room.");
-										numRemaining[character] = 0;
-										continue;
-									}
+							if (character == enumLength!Character)
+							{
+								// Done granting items.
 
-									numRemaining[character]--;
-									Item[enumLength!Item] itemChoices;
-									size_t numItemChoices;
-									foreach (item; Item.init .. enumLength!Item)
-									{
-										bool canAdd = {
-											switch (item)
+								// It's always the player's turn first.
+								State state4 = state3;
+								state4.currentTurn = Character.player;
+
+								driver.log(() => "Round begins.");
+								return driver.recurse(state4);
+							}
+
+							auto remainingRoom = maxItems - state3.totalItems(character);
+							if (remainingRoom < numItems)
+								driver.log(() => (character == Character.player ? "You don't" : "The dealer doesn't") ~ " have room to receive " ~ numItems.to!string ~ " item" ~ (numItems == 1 ? "" : "s") ~ ".");
+
+							auto grantedItems = min(numItems, remainingRoom);
+							if (grantedItems == 0)
+							{
+								driver.log(() => (character == Character.player ? "You don't" : "The dealer doesn't") ~ " receive any items.");
+								character++;
+								return grantItems(state3, character);
+							}
+
+							driver.log(() => (character == Character.player ? "You receive" : "The dealer receives") ~ " " ~ grantedItems.to!string ~ " item" ~ (grantedItems == 1 ? "" : "s") ~ ".");
+
+							static foreach (grantedItemsCT; 1 .. 4 + 1)
+								if (grantedItemsCT == grantedItems)
+									static foreach (numCigarettePacksCT; 0 .. 2 + 1)
+										if (numCigarettePacksCT == state3.items[character][Item.cigarettePack])
+										{
+											alias PackedItems = ubyte;
+											alias ItemCNS = CNS!(/*PackedItems*/uint, /*Item*/ubyte, grantedItemsCT, enumLength!Item, true, true);
+											static assert(ItemCNS.packedCard <= PackedItems.max);
+
+											PackedItems[] genItemChoiceTable()
 											{
-												case Item.cigarettePack:
-													return state3.items[character][Item.cigarettePack] < 2;
-												default:
-													return true;
+												PackedItems[] result;
+
+												/*Item*/ubyte[grantedItemsCT] items;
+												void iterate(size_t itemIndex, int remainingCigarettePacks)
+												{
+													if (itemIndex == grantedItemsCT)
+													{
+														auto sortedItems = items;
+														sortedItems[].sort();
+														result ~= cast(PackedItems)ItemCNS.pack(sortedItems);
+													}
+													else
+														foreach (item; Item.init .. enumLength!Item)
+														{
+															if (item == Item.cigarettePack && !remainingCigarettePacks)
+																continue;
+															items[itemIndex] = item;
+															iterate(itemIndex + 1, remainingCigarettePacks - (item == Item.cigarettePack ? 1 : 0));
+														}
+												}
+												iterate(0, 2 - numCigarettePacksCT);
+												return result;
 											}
-										}();
-										if (canAdd)
-											itemChoices[numItemChoices++] = item;
-									}
-									return driver.choice!Item(
-										ChoiceMode.random,
-										() => "What item did " ~ (character == Character.player ? "you" : "the dealer") ~ " get?",
-										(item) {
-											State state4 = state3;
-											state4.items[character][item]++;
-											return grantItems(state4, numRemaining);
-										},
-										(item) => capitalize(itemDescriptions[item]),
-										itemChoices[0 .. numItemChoices],
-									);
-								}
 
-							// It's always the player's turn first.
-							State state4 = state3;
-							state4.currentTurn = Character.player;
+											static immutable choiceTable = genItemChoiceTable();
 
-							driver.log(() => "Round begins.");
-							return driver.recurse(state4);
+											return driver.choice!PackedItems(
+												ChoiceMode.randomWithDuplicates,
+												() => "What items did " ~ (character == Character.player ? "you" : "the dealer") ~ " get?",
+												(packedItems) {
+													auto items = ItemCNS.unpack(packedItems);
+													State state4 = state3;
+													foreach (item; items)
+														state4.items[character][item]++;
+													assert(state4.totalItems(character) <= maxItems);
+													auto nextCharacter = character; nextCharacter++;
+													return grantItems(state4, nextCharacter);
+												},
+												(packedItems) {
+													auto items = ItemCNS.unpack(packedItems);
+													return items[].map!(item => itemDescriptions[item]).join(", ").capitalize;
+												},
+												choiceTable,
+											);
+										}
+
+							driver.log(() => "Impossible combination of granted items / cigarette packs.");
+							return Score.nan;
 						}
-						return grantItems(state2, [numItems, numItems]);
+						return grantItems(state2, Character.init);
 					},
 					numItems => numItems.to!string,
 					0, 1, 2, 3, 4
@@ -513,7 +555,7 @@ unittest
 			scope string delegate() description,
 			scope Score delegate(T) getScore,
 			scope string delegate(T) getDescription,
-			scope T[] items...
+			scope const(T)[] items...
 		) { assert(false); }
 	}
 
@@ -529,7 +571,7 @@ Score graphChoice(T)(
 	scope string delegate() description,
 	scope Score delegate(T) getScore,
 	scope string delegate(T) getDescription,
-	scope T[] items...
+	scope const(T)[] items...
 ) {
 	final switch (mode)
 	{
@@ -553,6 +595,9 @@ Score graphChoice(T)(
 			else
 			static if (is(T == enum))
 				enum size_t card = enumLength!T;
+			else
+			static if (is(T == ubyte))
+				enum size_t card = 256;
 			else
 				enum size_t card = 0;
 			static if (card)

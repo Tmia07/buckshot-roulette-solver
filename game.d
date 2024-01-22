@@ -17,7 +17,7 @@ enum ShellType : ubyte
 	live,
 }
 
-enum Item
+enum Item : ubyte
 {
 	lookingGlass,
 	handcuffs,
