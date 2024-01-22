@@ -30,10 +30,10 @@ alias PackedShellCount = WithMax!(ubyte, 4);
 alias PackedItem = ubyte;
 enum packedItemCard = 1 + enumLength!Item; // add 1 for "empty"
 alias PackedItemsBase = ushort;
-alias PackedItems = WithMax!(PackedItemsBase, packedItemsMax);
-static immutable itemBinomials = BinomialCoefficientTable!(PackedItemsBase, packedItemCard, maxItems).generate();
+static immutable itemBinomials = BinomialCoefficientTable!(PackedItemsBase, packedItemCard + maxItems, maxItems).generate();
 alias ItemCNS = CNS!(PackedItemsBase, PackedItem, maxItems, packedItemCard, /*lexicographic:*/false, /*multiset:*/true, itemBinomials);
-enum packedItemsMax = 1287; // multisetCoefficient(packedItemCard, maxItems)
+enum packedItemsCard = 1287; // == multisetCoefficient(packedItemCard, maxItems) == ItemCNS.packedCard
+alias PackedItems = WithMax!(PackedItemsBase, packedItemsCard - 1);
 
 alias PackedHealth = WithMax!(ubyte, 3); // min == 1 !
 
@@ -78,6 +78,7 @@ struct PrePackedGame
 	}
 
 	static byte[enumLength!Item] unpackItems(PackedItems p) nothrow @nogc
+	in (p < packedItemsCard)
 	{
 		PackedItem[maxItems] packedItems = ItemCNS.unpack(p);
 		byte[enumLength!Item] result;
@@ -122,3 +123,24 @@ immutable PackedGame packedGameCard = GameSerializer.cardinality;
 
 PackedGame packGame(Game game) nothrow @nogc { return GameSerializer.serialize(PrePackedGame(game)); }
 Game unpackGame(PackedGame packed) nothrow @nogc { return GameSerializer.deserialize(packed).unpack(); }
+
+
+version (main_packing)
+void main()
+{
+	import std.stdio: stderr;
+
+	// foreach (i; 0 .. packedGameCard)
+	// {
+	// 	if (i % 100_000 == 0) stderr.writeln(i, " / ", packedGameCard);
+	// 	assert(i.unpackGame().packGame() == i);
+	// }
+
+	// while (true)
+	// {
+	// 	import std.random : uniform;
+	// 	auto i = uniform(0, packedGameCard);
+	// 	if (i % 100_000 == 0) stderr.writeln(i, " / ", packedGameCard);
+	// 	assert(i.unpackGame().packGame() == i);
+	// }
+}
