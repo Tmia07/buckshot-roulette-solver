@@ -51,8 +51,20 @@ string scoreFileName(Opponent opponent)
 void propagateScores(const ScoreTable source, ScoreTable target, Opponent opponent)
 {
 	stderr.writeln("Copying...");
-	foreach (packedGame; packedGameCard.iota.parallel(packedGameCard / totalCPUs / 128))
-		target[packedGame] = source[packedGame];
+	{
+		PackedGame numDone;
+		foreach (packedGame; packedGameCard.iota.parallel(packedGameCard / totalCPUs / 128))
+		{
+			target[packedGame] = source[packedGame];
+			enum progressPeriod = 0x1000000;
+			if (packedGame % progressPeriod == 0)
+				synchronized
+				{
+					numDone += progressPeriod;
+					stderr.write(100 * numDone / packedGameCard, "%\r"); stderr.flush();
+				}
+		}
+	}
 
 	struct Driver
 	{
@@ -68,11 +80,21 @@ void propagateScores(const ScoreTable source, ScoreTable target, Opponent oppone
 	auto driver = Driver();
 
 	stderr.writeln("Expanding...");
-	foreach (packedGame; packedGameCard.iota.parallel(packedGameCard / totalCPUs / 128))
 	{
-		auto game = packedGame.unpackGame();
-		auto score = expand.expand(game, &driver, opponent);
-		target[packedGame] = score.packScore;
+		PackedGame numDone;
+		foreach (packedGame; packedGameCard.iota.parallel(packedGameCard / totalCPUs / 128))
+		{
+			auto game = packedGame.unpackGame();
+			auto score = expand.expand(game, &driver, opponent);
+			target[packedGame] = score.packScore;
+			enum progressPeriod = 0x1000000;
+			if (packedGame % progressPeriod == 0)
+				synchronized
+				{
+					numDone += progressPeriod;
+					stderr.write(100 * numDone / packedGameCard, "%\r"); stderr.flush();
+				}
+		}
 	}
 }
 
