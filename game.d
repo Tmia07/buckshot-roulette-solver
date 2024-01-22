@@ -3,13 +3,13 @@ import std.typecons;
 
 import ae.utils.meta;
 
-enum Character
+enum Character : ubyte
 {
 	player,
 	dealer,
 }
 
-Character other(Character character) { return cast(Character)(1 - character); }
+Character other(Character character) nothrow @nogc { return cast(Character)(1 - character); }
 
 enum ShellType : ubyte
 {
@@ -26,6 +26,9 @@ enum Item
 	handSaw,
 }
 
+enum maxShells = 8;
+enum maxItems = 8;
+
 enum HandcuffState
 {
 	none,
@@ -37,7 +40,7 @@ struct Game
 {
 	Character currentTurn;
 	byte[enumLength!ShellType] shells;
-	@property uint totalShells() const { return shells[].sum + (nextShell.isNull ? 0 : 1); }
+	@property uint totalShells() const nothrow @nogc { return shells[].sum + (nextShell.isNull ? 0 : 1); }
 	byte[enumLength!Item][enumLength!Character] items;
 	byte[enumLength!Character] health;
 	HandcuffState[enumLength!Character] handcuffs;
