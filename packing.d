@@ -37,11 +37,11 @@ alias PackedItems = WithMax!(PackedItemsBase, packedItemsCard - 1);
 
 alias PackedHealth = WithMax!(ubyte, 3); // min == 1 !
 
-enum PackedHandcuffState : ubyte { none, playerWillSkip, playerWillBreak, dealerWillSkip, dealerWillBreak }
+enum PackedHandcuffState : ubyte { none, currentWillSkip, otherWillSkip, otherWillBreak }
 immutable HandcuffState[2][enumLength!PackedHandcuffState] packedHandcuffStates = [
+	/* [current, other] */
 	[HandcuffState.none, HandcuffState.none],
 	[HandcuffState.willSkip, HandcuffState.none],
-	[HandcuffState.willBreak, HandcuffState.none],
 	[HandcuffState.none, HandcuffState.willSkip],
 	[HandcuffState.none, HandcuffState.willBreak],
 ];
@@ -94,7 +94,10 @@ struct PrePackedGame
 		foreach (i, value; game.shells) this.shells[i] = value;
 		foreach (i, value; game.items) this.items[i] = packItems(value);
 		foreach (i, value; game.health) this.health[i] = cast(ubyte)(value - 1);
-		this.handcuffs = cast(PackedHandcuffState)packedHandcuffStates.indexOf(game.handcuffs);
+		this.handcuffs = cast(PackedHandcuffState)packedHandcuffStates.indexOf([
+			game.handcuffs[game.currentTurn      ],
+			game.handcuffs[game.currentTurn.other]
+		].staticArray);
 		this.nextShell = cast(PackedNextShell)packedNextShell.indexOf(game.nextShell);
 		this.shotgunSawedOff = game.shotgunSawedOff;
 	}
@@ -106,7 +109,8 @@ struct PrePackedGame
 		foreach (i, value; this.shells) game.shells[i] = value;
 		foreach (i, value; this.items) game.items[i] = unpackItems(value);
 		foreach (i, value; this.health) game.health[i] = cast(ubyte)(value + 1);
-		game.handcuffs = packedHandcuffStates[this.handcuffs];
+		game.handcuffs[game.currentTurn      ] = packedHandcuffStates[this.handcuffs][0];
+		game.handcuffs[game.currentTurn.other] = packedHandcuffStates[this.handcuffs][1];
 		game.nextShell = packedNextShell[this.nextShell];
 		game.shotgunSawedOff = this.shotgunSawedOff;
 		return game;
@@ -143,4 +147,31 @@ void main()
 	// 	if (i % 100_000 == 0) stderr.writeln(i, " / ", packedGameCard);
 	// 	assert(i.unpackGame().packGame() == i);
 	// }
+
+	while (true)
+	{
+		import std.random : uniform;
+		import expand : expand, Score, Opponent, graphChoice, scoreIndeterminate;
+
+		auto i = uniform(0, packedGameCard);
+		if (i % 100_000 == 0) stderr.writeln(i, " / ", packedGameCard);
+		auto game = i.unpackGame();
+
+		struct Driver
+		{
+			void log(scope string delegate() message) nothrow @nogc {}
+
+			Score recurse(const ref Game game) nothrow @nogc
+			{
+				assert(game.packGame().unpackGame() == game);
+				return scoreIndeterminate;
+			}
+
+			alias choice = graphChoice;
+		}
+		auto driver = Driver();
+
+		scope(failure) stderr.writeln(game);
+		expand(game, driver, Opponent.init);
+	}
 }
