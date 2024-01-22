@@ -45,7 +45,7 @@ alias ScoreTable = PackedScore[/*packedGameCard*/];
 
 string scoreFileName(Opponent opponent)
 {
-	return "data/scores-" ~ text(opponent) ~ ".f32";
+	return "data/scores-" ~ text(opponent) ~ ".i" ~ text(PackedScore.Value.sizeof * 8);
 }
 
 void propagateScores(const ScoreTable source, ScoreTable target, Opponent opponent)
