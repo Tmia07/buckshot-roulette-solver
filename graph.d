@@ -3,6 +3,7 @@ import std.algorithm.iteration;
 import std.conv;
 import std.file;
 import std.math.algebraic;
+import std.math.rounding;
 import std.parallelism;
 import std.range;
 import std.stdio : File, stderr;
@@ -17,7 +18,30 @@ import game;
 import expand;
 import packing;
 
-alias ScoreTable = Score[/*packedGameCard*/];
+struct PackedScore
+{
+	alias Value = ushort;
+	Value value;
+}
+
+PackedScore packScore(Score score) nothrow @nogc
+in(0 <= score && score <= 1)
+{
+	return PackedScore(cast(PackedScore.Value)round(score * PackedScore.Value.max));
+}
+
+Score unpackScore(PackedScore packed) nothrow @nogc
+{
+	return Score(packed.value) / PackedScore.Value.max;
+}
+
+unittest
+{
+	foreach (score; [0, 0.25, 0.5, 0.75, 1])
+		assert(abs(score - score.packScore.unpackScore) < 1.0 / PackedScore.Value.max);
+}
+
+alias ScoreTable = PackedScore[/*packedGameCard*/];
 
 string scoreFileName(Opponent opponent)
 {
@@ -36,7 +60,7 @@ void propagateScores(const ScoreTable source, ScoreTable target, Opponent oppone
 
 		Score recurse(const ref Game game) nothrow @nogc
 		{
-			return source[game.packGame()];
+			return source[game.packGame()].unpackScore;
 		}
 
 		alias choice = graphChoice;
@@ -48,7 +72,7 @@ void propagateScores(const ScoreTable source, ScoreTable target, Opponent oppone
 	{
 		auto game = packedGame.unpackGame();
 		auto score = expand.expand(game, &driver, opponent);
-		target[packedGame] = score;
+		target[packedGame] = score.packScore;
 	}
 }
 
@@ -64,13 +88,13 @@ void generateScoreFile(Opponent opponent)
 		writeln("Initializing scores...");
 		void createFile(string target)
 		{
-			File(target, "wb").truncate(packedGameCard * Score.sizeof);
+			File(target, "wb").truncate(packedGameCard * PackedScore.sizeof);
 			mapFile(target, MmMode.readWrite)
-				.asDataOf!Score
-				.enter((scope Score[] scores) {
+				.asDataOf!PackedScore
+				.enter((scope PackedScore[] scores) {
 					//scores[] = scoreIndeterminate;
 					foreach (packedGame; packedGameCard.iota.parallel(packedGameCard / totalCPUs / 128))
-						scores[packedGame] = scoreIndeterminate;
+						scores[packedGame] = scoreIndeterminate.packScore;
 				});
 		}
 		atomic!createFile(fn);
@@ -80,26 +104,26 @@ void generateScoreFile(Opponent opponent)
 	{
 		writeln("Iteration #", iter);
 
-		auto currentData = mapFile(fn, MmMode.read).asDataOf!Score;
+		auto currentData = mapFile(fn, MmMode.read).asDataOf!PackedScore;
 		auto current = currentData.unsafeContents;
 
 		auto nextFn = fn ~ "-next";
-		File(nextFn, "wb").truncate(packedGameCard * Score.sizeof);
+		File(nextFn, "wb").truncate(packedGameCard * PackedScore.sizeof);
 
-		auto nextData = mapFile(nextFn, MmMode.readWrite).asDataOf!Score;
+		auto nextData = mapFile(nextFn, MmMode.readWrite).asDataOf!PackedScore;
 		auto next = nextData.unsafeContents;
 
 		propagateScores(current, next, opponent);
 
-		auto totalChange = zip(current, next).map!(pair => abs(double(pair[0]) - pair[1])).sum;
-		auto maxChange = zip(current, next).map!(pair => abs(double(pair[0]) - pair[1])).reduce!max;
+		auto totalChange = zip(current, next).map!(pair => abs(int(pair[0].value) - pair[1].value)).sum;
+		auto maxChange = zip(current, next).map!(pair => abs(int(pair[0].value) - pair[1].value)).reduce!max;
 		auto numChanged = zip(current, next).map!(pair => pair[0] == pair[1] ? 1L : 0L).sum;
 		// auto crc = crc32Of(table);
-		auto changeLimit = 1.0 / (2 ^^ (Score.mant_dig - 2)); // Calculate up to 22 bits of precision
+		auto changeLimit = 1;
 		writeln(" > Change: num=", numChanged, " / ", packedGameCard,
-			", total=", totalChange.fpToString,
-			", avg=", (totalChange / packedGameCard).fpToString,
-			", max=", maxChange.fpToString, " / ", changeLimit.fpToString,
+			", total=", totalChange,
+			", avg=", (double(totalChange) / packedGameCard).fpToString,
+			", max=", maxChange, " / ", changeLimit,
 			// ", CRC=", crc[].format!"%(%02x%)",
 		);
 
