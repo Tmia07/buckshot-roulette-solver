@@ -59,73 +59,113 @@ enum ChoiceMode
 
 Score expand(Driver)(const ref Game game, Driver driver)
 {
-	void switchTurn(ref Game game)
+	struct State
 	{
-		game.currentTurn = game.currentTurn.other;
-		driver.log(() => "It is now " ~ (game.currentTurn == Character.player ? "your" : "the dealer's") ~ " turn.");
-		if (game.handcuffs[game.currentTurn] == HandcuffState.willBreak)
+		Game game;
+		alias game this;
+
+		// Things that should be in the state (`Game`) but aren't
+		// (because it's relatively inconsequential and will increase the state space too much):
+
+		/// Upper and lower bound, inclusive, of what the initial health is
+		/// (which is also the health that a character can heal up to).
+		ubyte initialHealthMin = 2, initialHealthMax = 4;
+	}
+
+	Score resolveCanHealTo(Dg)(const ref State state, ubyte targetHealth, scope /*Score delegate(State newState, bool result) nothrow @nogc*/ Dg handler)
+	{
+		State newState = state;
+		newState.initialHealthMin = newState.initialHealthMin.max(newState.health[].fold!max(ubyte(0)));
+
+		if (targetHealth > newState.initialHealthMax)
+			return handler(newState, false);
+		else
+		if (targetHealth <= newState.initialHealthMax)
+			return handler(newState, true);
+		else
+			return driver.choice!bool(
+				ChoiceMode.worst,
+				() => "Is it possible to have " ~ targetHealth.to!string ~ " charges?",
+				(result) {
+					// TODO newState mutation
+					if (result)
+						newState.initialHealthMin = targetHealth;
+					else
+						newState.initialHealthMax = cast(ubyte)(targetHealth - 1);
+					return handler(newState, result);
+				},
+				result => result ? "Yes" : "No",
+				false, true,
+			);
+	}
+
+	void switchTurn(ref State state)
+	{
+		state.currentTurn = state.currentTurn.other;
+		driver.log(() => "It is now " ~ (state.currentTurn == Character.player ? "your" : "the dealer's") ~ " turn.");
+		if (state.handcuffs[state.currentTurn] == HandcuffState.willBreak)
 		{
-			driver.log(() => (game.currentTurn == Character.player ? "Your" : "The dealer's") ~ " handcuffs break off.");
-			game.handcuffs[game.currentTurn] = HandcuffState.none;
+			driver.log(() => (state.currentTurn == Character.player ? "Your" : "The dealer's") ~ " handcuffs break off.");
+			state.handcuffs[state.currentTurn] = HandcuffState.none;
 		}
 	}
 
-	Score resolveRound(Dg)(const ref Game game, scope /* Score delegate(ShellType shellType, ref Game newGame) nothrow @nogc */ Dg handler)
+	Score resolveRound(Dg)(const ref State state, scope /* Score delegate(ShellType shellType, ref State newState) nothrow @nogc */ Dg handler)
 	{
-		if (!game.nextShell.isNull)
+		if (!state.nextShell.isNull)
 		{
-			Game newGame = game;
-			auto shellType = newGame.nextShell.get();
-			newGame.nextShell.nullify();
-			return handler(shellType, newGame);
+			State newState = state;
+			auto shellType = newState.nextShell.get();
+			newState.nextShell.nullify();
+			return handler(shellType, newState);
 		}
 		
 		ShellType[maxShells] shells;
 		size_t numShells;
 		foreach (shellType; ShellType.init .. enumLength!ShellType)
-			foreach (i; 0 .. game.shells[shellType])
+			foreach (i; 0 .. state.shells[shellType])
 				shells[numShells++] = shellType;
 
 		return driver.choice!ShellType(
 			ChoiceMode.random,
-			"What shell is next?",
+			() => "What shell is next?",
 			(shellType) {
-				Game newGame = game;
-				newGame.shells[shellType]--;
-				return handler(shellType, newGame);
+				State newState = state;
+				newState.shells[shellType]--;
+				return handler(shellType, newState);
 			},
 			shellType => ["Blank", "Live"][shellType],
 			shells[0 .. numShells]
 		);
 	}
 
-	Score shoot(Character whom)
+	Score shoot(ref const State state, Character whom)
 	{
 		driver.log(() => 
-			game.currentTurn == Character.player
-			? whom           == Character.player
+			state.currentTurn == Character.player
+			? whom            == Character.player
 			? "You shoot yourself."
 			: "You shoot the dealer."
-			: whom           == Character.player
+			: whom            == Character.player
 			? "The dealer shoots you."
 			: "The dealer shoots themselves."
 		);
-		return resolveRound(game, (ShellType shellType, ref Game newGame) {
+		return resolveRound(state, (ShellType shellType, ref State newState) {
 			auto damage = 1;
-			if (newGame.shotgunSawedOff)
+			if (newState.shotgunSawedOff)
 				damage = 2;
 			final switch (shellType)
 			{
 				case ShellType.blank:
 					driver.log(() => "Blank. No damage.");
 					// If the shotgun was aimed at the other player, switch turns
-					if (whom != newGame.currentTurn)
-						switchTurn(newGame);
+					if (whom != newState.currentTurn)
+						switchTurn(newState);
 					break;
 				case ShellType.live:
 					driver.log(() => (whom == Character.player ? "You take" : "The dealer takes") ~ " " ~ damage.to!string ~ " damage.");
-					newGame.health[whom] -= damage;
-					if (newGame.health[whom] <= 0)
+					newState.health[whom] -= damage;
+					if (newState.health[whom] <= 0)
 						final switch (whom)
 						{
 							case Character.player:
@@ -135,115 +175,141 @@ Score expand(Driver)(const ref Game game, Driver driver)
 								driver.log(() => "The dealer is out. You win!");
 								return 1;
 						}
-					switchTurn(newGame);
+					switchTurn(newState);
 					break;
 			}
-			if (newGame.shotgunSawedOff)
+			if (newState.shotgunSawedOff)
 			{
 				driver.log(() => "The shotgun barrel reapparates.");
-				newGame.shotgunSawedOff = false;
+				newState.shotgunSawedOff = false;
 			}
-			return driver.recurse(newGame);
+			return driver.recurse(newState);
 		});
 	}
 
-	Score use(Item item)
+	Score use(ref const State state, Item item)
 	{
-		if (!game.items[game.currentTurn][item])
+		if (!state.items[state.currentTurn][item])
 			return Score.nan;
-		driver.log(() => (game.currentTurn == Character.player ? "You use " : "The dealer uses ") ~ itemDescriptions[item] ~ ".");
-		Game newGame = game;
-		newGame.items[game.currentTurn][item]--;
+		driver.log(() => (state.currentTurn == Character.player ? "You use " : "The dealer uses ") ~ itemDescriptions[item] ~ ".");
+		State newState = state;
+		newState.items[state.currentTurn][item]--;
 		final switch (item)
 		{
 			case Item.handcuffs:
-				if (newGame.handcuffs[newGame.currentTurn.other])
+				if (newState.handcuffs[newState.currentTurn.other])
 					return Score.nan;
-				newGame.handcuffs[newGame.currentTurn.other] = HandcuffState.willSkip;
-				driver.log(() => (newGame.currentTurn.other == Character.player ? "You are" : "The dealer is") ~ " now handcuffed.");
-				return driver.recurse(newGame);
+				newState.handcuffs[newState.currentTurn.other] = HandcuffState.willSkip;
+				driver.log(() => (newState.currentTurn.other == Character.player ? "You are" : "The dealer is") ~ " now handcuffed.");
+				return driver.recurse(newState);
 			case Item.lookingGlass:
-				if (!newGame.nextShell.isNull)
+				if (!newState.nextShell.isNull)
 					return Score.nan;
-				return resolveRound(newGame, (ShellType shellType, ref Game newGame) {
-					driver.log(() => (newGame.currentTurn == Character.player ? "You now know" : "The dealer now knows") ~ " that the next shell is " ~ shellType.to!string ~ ".");
-					newGame.nextShell = shellType;
-					return driver.recurse(newGame);
+				return resolveRound(newState, (ShellType shellType, ref State newState) {
+					driver.log(() => (newState.currentTurn == Character.player ? "You now know" : "The dealer now knows") ~ " that the next shell is " ~ shellType.to!string ~ ".");
+					newState.nextShell = shellType;
+					return driver.recurse(newState);
 				});
 			case Item.beer:
-				return resolveRound(newGame, (ShellType shellType, ref Game newGame) {
-					driver.log(() => (newGame.currentTurn == Character.player ? "You rack" : "The dealer racks") ~ " the shotgun, and a " ~ shellType.to!string ~ " shell is ejected.");
-					return driver.recurse(newGame);
+				return resolveRound(newState, (ShellType shellType, ref State newState) {
+					driver.log(() => (newState.currentTurn == Character.player ? "You rack" : "The dealer racks") ~ " the shotgun, and a " ~ shellType.to!string ~ " shell is ejected.");
+					return driver.recurse(newState);
 				});
 			case Item.cigarettePack:
-				if (newGame.health[game.currentTurn] < maxHealth)
+				Score smoke(bool canHeal)
 				{
-					driver.log(() => (newGame.currentTurn == Character.player ? "You restore" : "The dealer restores") ~ " one charge.");
-					newGame.health[game.currentTurn]++;
+					if (canHeal)
+					{
+						driver.log(() => (newState.currentTurn == Character.player ? "You restore" : "The dealer restores") ~ " one charge.");
+						newState.health[state.currentTurn]++;
+					}
+					else
+						driver.log(() => (newState.currentTurn == Character.player ? "You are" : "The dealer is") ~ " already at maximum charges.");
+					return driver.recurse(newState);
 				}
-				else
-					driver.log(() => (newGame.currentTurn == Character.player ? "You are" : "The dealer is") ~ " already at maximum charges.");
-				return driver.recurse(newGame);
+				return resolveCanHealTo(state, cast(ubyte)(newState.health[state.currentTurn] + 1),
+					(State newState, bool result) { return smoke(result); });
 			case Item.handSaw:
-				if (newGame.shotgunSawedOff)
+				if (newState.shotgunSawedOff)
 					return Score.nan;
-				newGame.shotgunSawedOff = true;
+				newState.shotgunSawedOff = true;
 				driver.log(() => "The shotgun barrel is now sawed off.");
-				return driver.recurse(newGame);
+				return driver.recurse(newState);
 		}
 	}
 
-	Score tryMove(Move move)
+	Score tryMove(ref const State state, Move move)
 	{
 		final switch (move)
 		{
-			case Move.shootSelf : return shoot(game.currentTurn);
-			case Move.shootOther: return shoot(game.currentTurn.other);
-			case Move.useLookingGlass: return use(Item.lookingGlass);
-			case Move.useHandcuffs: return use(Item.handcuffs);
-			case Move.useBeer: return use(Item.beer);
-			case Move.useCigarettePack: return use(Item.cigarettePack);
-			case Move.useHandSaw: return use(Item.handSaw);
+			case Move.shootSelf : return shoot(state, state.currentTurn);
+			case Move.shootOther: return shoot(state, state.currentTurn.other);
+			case Move.useLookingGlass: return use(state, Item.lookingGlass);
+			case Move.useHandcuffs: return use(state, Item.handcuffs);
+			case Move.useBeer: return use(state, Item.beer);
+			case Move.useCigarettePack: return use(state, Item.cigarettePack);
+			case Move.useHandSaw: return use(state, Item.handSaw);
 		}
 	}
 
-	if (game.totalShells == 0)
+	immutable state = State(game);
+
+	if (state.totalShells == 0)
 	{
 		// End of round.
 		driver.log(() => "Starting new round.");
-		// Refill magazine. TODO: better distribution, or even iterate?
-		Game newGame = game;
-		newGame.shells[] = 2;
+
+		State newState = state;
+
+		// It's always the player's turn first.
+		newState.currentTurn = Character.player;
+
 		// Handcuffs come off. How will you grab the items otherwise?
-		newGame.handcuffs[] = HandcuffState.none;
+		newState.handcuffs[] = HandcuffState.none;
+
+		// Refill magazine.
+		return driver.choice!ubyte(
+			ChoiceMode.random,
+			() => "How many shells are loaded?",
+			(totalShells) {
+				auto liveShells = cast(ubyte)(totalShells / 2); // rounding down
+				auto blankShells = cast(ubyte)(totalShells - liveShells);
+				driver.log(() => blankShells.to!string ~ " blank, " ~ liveShells.to!string ~ " live.");
+				newState.shells[ShellType.blank] = blankShells;
+				newState.shells[ShellType.live] = liveShells;
+				// TODO
+				return Score(0);
+			},
+			totalShells => totalShells.to!string,
+			2, 3, 4, 5, 6, 7, 8
+		);
+
 		// Give some items. Random distribution would probably be too slow.
 		foreach (character; Character.init .. enumLength!Character)
-			newGame.items[character][Item.lookingGlass]++;
-		// It's always the player's turn first.
-		newGame.currentTurn = Character.player;
-		return driver.recurse(newGame);
+			newState.items[character][Item.lookingGlass]++;
+		return driver.recurse(newState);
 	}
 
-	if (game.handcuffs[game.currentTurn] == HandcuffState.willSkip)
+	if (state.handcuffs[state.currentTurn] == HandcuffState.willSkip)
 	{
-		driver.log(() => game.currentTurn == Character.player
+		driver.log(() => state.currentTurn == Character.player
 			? "You are handcuffed and skip your turn."
 			: "The dealer is handcuffed and skips their turn."
 		);
-		Game newGame = game;
-		newGame.handcuffs[game.currentTurn] = HandcuffState.willBreak;
-		switchTurn(newGame);
-		return driver.recurse(newGame);
+		State newState = state;
+		newState.handcuffs[state.currentTurn] = HandcuffState.willBreak;
+		switchTurn(newState);
+		return driver.recurse(newState);
 	}
 
-	final switch (game.currentTurn)
+	final switch (state.currentTurn)
 	{
 		case Character.player:
 			// Assume that the player will proceed according to what's best for them.
 			return driver.choice!Move(
 				ChoiceMode.best,
-				"What will you do?",
-				&tryMove,
+				() => "What will you do?",
+				move => tryMove(state, move),
 				move => getMoveDescription(move, Character.player),
 				EnumMembers!Move,
 			);
@@ -263,90 +329,99 @@ Score expand(Driver)(const ref Game game, Driver driver)
 			}
 			else
 			{
-				Score coinFlip(T)(
-					scope Score delegate(T) getScore,
-					scope string delegate(T) getDescription,
-					scope T[] items...
-				)
+				Score dealerAI(ref const State state, bool dealerCanHeal)
 				{
-					assert(items.length == 2);
-					return driver.choice!T(
-						ChoiceMode.random,
-						"The dealer flips a coin...",
-						getScore,
-						item => (item == items[0] ? "Heads" : "Tails") ~ ": " ~ getDescription(item),
-						items
-					);
+					Score coinFlip(T)(
+						scope Score delegate(T) getScore,
+						scope string delegate(T) getDescription,
+						scope T[] items...
+					)
+					{
+						assert(items.length == 2);
+						return driver.choice!T(
+							ChoiceMode.random,
+							() => "The dealer flips a coin...",
+							getScore,
+							item => (item == items[0] ? "Heads" : "Tails") ~ ": " ~ getDescription(item),
+							items
+						);
+					}
+
+
+					// Simulate state AI
+					Nullable!Character dealerTarget;
+					Nullable!ShellType knownShell;
+					bool dealerKnowsShell;
+
+					if (!state.nextShell.isNull)
+					{
+						// If it's resolved, it's guaranteed that the current character knows it
+						knownShell = state.nextShell;
+						dealerTarget = knownShell.get() == ShellType.live
+							? Character.player
+							: Character.dealer;
+						dealerKnowsShell = true;
+					}
+
+					if (state.totalShells == 1)
+					{
+						knownShell = state.shells[ShellType.live]
+							? ShellType.live
+							: ShellType.blank;
+						dealerTarget = knownShell.get() == ShellType.live
+							? Character.player
+							: Character.dealer;
+						dealerKnowsShell = true;
+					}
+
+					// The real AI actually iterates over items using a hidden internal order
+					// (order that items were acquired).
+					// To be safe, assume an order which is most inconvenient for us.
+					Move[enumLength!Item] itemOptions; size_t numItemOptions;
+					if (state.items[state.currentTurn][Item.lookingGlass] && !dealerKnowsShell && state.totalShells != 1)
+						itemOptions[numItemOptions++] = Move.useLookingGlass;
+					if (state.items[state.currentTurn][Item.cigarettePack] && state.health[state.currentTurn] < dealerCanHeal)
+						itemOptions[numItemOptions++] = Move.useCigarettePack;
+					if (state.items[state.currentTurn][Item.beer] && knownShell != ShellType.live.nullable && state.totalShells != 1)
+						itemOptions[numItemOptions++] = Move.useBeer;
+					if (state.items[state.currentTurn][Item.handcuffs] && state.handcuffs[state.currentTurn.other] == HandcuffState.none && state.totalShells != 1)
+						itemOptions[numItemOptions++] = Move.useHandcuffs;
+					if (state.items[state.currentTurn][Item.handSaw] && !state.shotgunSawedOff && knownShell == ShellType.live.nullable)
+						itemOptions[numItemOptions++] = Move.useHandSaw;
+					if (numItemOptions)
+						return driver.choice!Move(
+							ChoiceMode.worst,
+							() => "The dealer will use an item...",
+							move => tryMove(state, move),
+							move => getMoveDescription(move, Character.dealer),
+							itemOptions[0 .. numItemOptions]
+						);
+
+					if (state.items[state.currentTurn][Item.handSaw] && !state.shotgunSawedOff && knownShell != nullable(ShellType.blank))
+						return coinFlip!Move(
+							move => tryMove(state, move),
+							move => getMoveDescription(move, Character.dealer),
+							Move.shootSelf, Move.useHandSaw,
+						);
+
+					if (dealerTarget.isNull)
+						return coinFlip!Move(
+							move => tryMove(state, move),
+							move => getMoveDescription(move, Character.dealer),
+							Move.shootSelf, Move.shootOther,
+						);
+					else
+					{
+						auto move = dealerTarget.get() == Character.dealer ? Move.shootSelf : Move.shootOther;
+						return tryMove(state, move);
+					}
 				}
-					
 
-				// Simulate game AI
-				Nullable!Character dealerTarget;
-				Nullable!ShellType knownShell;
-				bool dealerKnowsShell;
-
-				if (!game.nextShell.isNull)
-				{
-					// If it's resolved, it's guaranteed that the current character knows it
-					knownShell = game.nextShell;
-					dealerTarget = knownShell.get() == ShellType.live
-						? Character.player
-						: Character.dealer;
-					dealerKnowsShell = true;
-				}
-
-				if (game.totalShells == 1)
-				{
-					knownShell = game.shells[ShellType.live]
-						? ShellType.live
-						: ShellType.blank;
-					dealerTarget = knownShell.get() == ShellType.live
-						? Character.player
-						: Character.dealer;
-					dealerKnowsShell = true;
-				}
-
-				// The real AI actually iterates over items using a hidden internal order
-				// (order that items were acquired).
-				// To be safe, assume an order which is most inconvenient for us.
-				Move[enumLength!Item] itemOptions; size_t numItemOptions;
-				if (game.items[game.currentTurn][Item.lookingGlass] && !dealerKnowsShell && game.totalShells != 1)
-					itemOptions[numItemOptions++] = Move.useLookingGlass;
-				if (game.items[game.currentTurn][Item.cigarettePack] && game.health[game.currentTurn] < maxHealth)
-					itemOptions[numItemOptions++] = Move.useCigarettePack;
-				if (game.items[game.currentTurn][Item.beer] && knownShell != ShellType.live.nullable && game.totalShells != 1)
-					itemOptions[numItemOptions++] = Move.useBeer;
-				if (game.items[game.currentTurn][Item.handcuffs] && game.handcuffs[game.currentTurn.other] == HandcuffState.none && game.totalShells != 1)
-					itemOptions[numItemOptions++] = Move.useHandcuffs;
-				if (game.items[game.currentTurn][Item.handSaw] && !game.shotgunSawedOff && knownShell == ShellType.live.nullable)
-					itemOptions[numItemOptions++] = Move.useHandSaw;
-				if (numItemOptions)
-					return driver.choice!Move(
-						ChoiceMode.worst,
-						"The dealer will use an item...",
-						&tryMove,
-						move => getMoveDescription(move, Character.dealer),
-						itemOptions[0 .. numItemOptions]
-					);
-
-				if (game.items[game.currentTurn][Item.handSaw] && !game.shotgunSawedOff && knownShell != nullable(ShellType.blank))
-					return coinFlip!Move(
-						&tryMove,
-						move => getMoveDescription(move, Character.dealer),
-						Move.shootSelf, Move.useHandSaw,
-					);
-
-				if (dealerTarget.isNull)
-					return coinFlip!Move(
-						&tryMove,
-						move => getMoveDescription(move, Character.dealer),
-						Move.shootSelf, Move.shootOther,
-					);
+				// Resolve if dealer can heal here
+				if (state.items[state.currentTurn][Item.cigarettePack])
+					return resolveCanHealTo(state, cast(ubyte)(state.health[state.currentTurn] + 1), (State newState, bool result) { return dealerAI(newState, result); });
 				else
-				{
-					auto move = dealerTarget.get() == Character.dealer ? Move.shootSelf : Move.shootOther;
-					return tryMove(move);
-				}
+					return dealerAI(state, false);
 			}
 	}
 }
@@ -368,7 +443,7 @@ unittest
 		/// Filter out NaNs!
 		Score choice(T)(
 			ChoiceMode mode,
-			lazy string description,
+			scope string delegate() description,
 			scope Score delegate(T) getScore,
 			scope string delegate(T) getDescription,
 			scope T[] items...
@@ -380,5 +455,3 @@ unittest
 	if (false)
 		expand(game, driver);
 }
-
-enum maxHealth = 3; // depends on current act
