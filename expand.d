@@ -137,7 +137,7 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 			newState.nextShell.nullify();
 			return handler(shellType, newState);
 		}
-		
+
 		ShellType[maxShells] shells;
 		size_t numShells;
 		foreach (shellType; ShellType.init .. enumLength!ShellType)
@@ -567,6 +567,8 @@ Score graphChoice(T)(
 				{
 					auto item = cast(T)index;
 					auto count = counts[index];
+					if (!count)
+						continue;
 
 					auto itemScore = getScore(item);
 					if (!itemScore.isNaN)
