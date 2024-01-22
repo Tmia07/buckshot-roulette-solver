@@ -42,6 +42,7 @@ struct Game
 	byte[enumLength!ShellType] shells;
 	@property uint totalShells() const nothrow @nogc { return shells[].sum + (nextShell.isNull ? 0 : 1); }
 	byte[enumLength!Item][enumLength!Character] items;
+	uint totalItems(Character character) const nothrow @nogc { return items[character][].sum; }
 	byte[enumLength!Character] health;
 	HandcuffState[enumLength!Character] handcuffs;
 	Nullable!ShellType nextShell;
