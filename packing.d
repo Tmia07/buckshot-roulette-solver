@@ -65,7 +65,7 @@ struct PrePackedGame
 	PackedNextShell nextShell;
 	bool shotgunSawedOff;
 
-	static PackedItems packItems(byte[enumLength!Item] items) @nogc
+	static PackedItems packItems(byte[enumLength!Item] items) nothrow @nogc
 	{
 		PackedItem[maxItems] packedItems;
 		size_t i = maxItems;
@@ -77,7 +77,7 @@ struct PrePackedGame
 		return result;
 	}
 
-	static byte[enumLength!Item] unpackItems(PackedItems p) @nogc
+	static byte[enumLength!Item] unpackItems(PackedItems p) nothrow @nogc
 	{
 		PackedItem[maxItems] packedItems = ItemCNS.unpack(p);
 		byte[enumLength!Item] result;
@@ -87,7 +87,7 @@ struct PrePackedGame
 		return result;
 	}
 
-	this(Game game) @nogc
+	this(Game game) nothrow @nogc
 	{
 		this.currentTurn = game.currentTurn;
 		foreach (i, value; game.shells) this.shells[i] = value;
@@ -98,7 +98,7 @@ struct PrePackedGame
 		this.shotgunSawedOff = game.shotgunSawedOff;
 	}
 
-	Game unpack() @nogc
+	Game unpack() nothrow @nogc
 	{
 		Game game;
 		game.currentTurn = this.currentTurn;
@@ -120,5 +120,5 @@ alias GameSerializer = SerializationCoder!(MixedRadixCoder!(PrePackedGameField, 
 static assert(GameSerializer.minValue == 0);
 immutable PackedGame packedGameCard = GameSerializer.cardinality;
 
-PackedGame packGame(Game game) @nogc { return GameSerializer.serialize(PrePackedGame(game)); }
-Game unpackGame(PackedGame packed) @nogc { return GameSerializer.deserialize(packed).unpack(); }
+PackedGame packGame(Game game) nothrow @nogc { return GameSerializer.serialize(PrePackedGame(game)); }
+Game unpackGame(PackedGame packed) nothrow @nogc { return GameSerializer.deserialize(packed).unpack(); }

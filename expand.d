@@ -1,6 +1,7 @@
 import std.algorithm.comparison;
 import std.algorithm.iteration;
 import std.conv : to;
+import std.math.traits;
 import std.stdio;
 import std.string : capitalize;
 import std.traits;
@@ -44,21 +45,37 @@ string getMoveDescription(Move move, Character who)
 }
 
 alias Score = double;
+enum Score scoreLose = 0;
+enum Score scoreWin = 1;
+enum Score scoreIndeterminate = (scoreLose + scoreWin) / 2;
 
 /// For `Driver.choice`
 enum ChoiceMode
 {
 	/// Something the game would choose at random.
+	/// All odds are equal.
 	random,
+	/// Same as "random", but the items can contain duplicates,
+	/// to represent a biased choice.
+	randomWithDuplicates,
 	/// Something the player decides,
 	/// so we should pick the best option for the player.
 	best,
-	/// Something the game decides in an unpredictable way,
-	/// so we should pick the worst option for the player.
+	/// Something a hypothetical perfect opponent would choose.
 	worst,
+	/// Something the game decides in an unpredictable way.
+	/// For calculating the win chance, we treat this
+	/// in the same way as "worst", to be safe.
+	unknown,
 }
 
-Score expand(Driver)(const ref Game game, Driver driver)
+enum Opponent
+{
+	game,
+	perfect,
+}
+
+Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 {
 	struct State
 	{
@@ -85,7 +102,7 @@ Score expand(Driver)(const ref Game game, Driver driver)
 			return handler(state1, true);
 		else
 			return driver.choice!bool(
-				ChoiceMode.worst,
+				ChoiceMode.unknown,
 				() => "Is it possible to have " ~ targetHealth.to!string ~ " charges?",
 				(result) {
 					auto state2 = state1;
@@ -128,7 +145,7 @@ Score expand(Driver)(const ref Game game, Driver driver)
 				shells[numShells++] = shellType;
 
 		return driver.choice!ShellType(
-			ChoiceMode.random,
+			ChoiceMode.randomWithDuplicates,
 			() => "What shell is next?",
 			(shellType) {
 				State newState = state;
@@ -171,10 +188,10 @@ Score expand(Driver)(const ref Game game, Driver driver)
 						{
 							case Character.player:
 								driver.log(() => "You are out. You lose!");
-								return 0;
+								return scoreLose;
 							case Character.dealer:
 								driver.log(() => "The dealer is out. You win!");
-								return 1;
+								return scoreWin;
 						}
 					switchTurn(newState);
 					break;
@@ -367,113 +384,110 @@ Score expand(Driver)(const ref Game game, Driver driver)
 			);
 
 		case Character.dealer:
-			static if (false)
+			final switch (opponent)
 			{
-				// Assume that the dealer will proceed according to what's worst for the player.
-				auto worstResult = SearchResult(Score.infinity);
-				foreach (move; Move.init .. enumLength!Move)
-				{
-					auto score = tryMove(move);
-					if (score < worstResult.score)
-						worstResult = SearchResult(score, move);
-				}
-				return worstResult;
-			}
-			else
-			{
-				Score dealerAI(ref const State state1, bool dealerCanHeal)
-				{
-					Score coinFlip(T)(
-						scope Score delegate(T) getScore,
-						scope string delegate(T) getDescription,
-						scope T[] items...
-					)
+				case Opponent.perfect:
+					return driver.choice!Move(
+						ChoiceMode.worst,
+						() => "What does the dealer do?",
+						move => tryMove(state0, move),
+						move => getMoveDescription(move, Character.dealer),
+						EnumMembers!Move,
+					);
+				case Opponent.game:
+					Score dealerAI(ref const State state1, bool dealerCanHeal)
 					{
-						assert(items.length == 2);
-						return driver.choice!T(
-							ChoiceMode.random,
-							() => "The dealer flips a coin...",
-							getScore,
-							item => (item == items[0] ? "Heads" : "Tails") ~ ": " ~ getDescription(item),
-							items
-						);
+						Score coinFlip(T)(
+							scope Score delegate(T) getScore,
+							scope string delegate(T) getDescription,
+							scope T[] items...
+						)
+						{
+							assert(items.length == 2);
+							return driver.choice!T(
+								ChoiceMode.random,
+								() => "The dealer flips a coin...",
+								getScore,
+								item => (item == items[0] ? "Heads" : "Tails") ~ ": " ~ getDescription(item),
+								items
+							);
+						}
+
+
+						// Simulate game AI
+						Nullable!Character dealerTarget;
+						Nullable!ShellType knownShell;
+						bool dealerKnowsShell;
+
+						if (!state1.nextShell.isNull)
+						{
+							// If it's resolved, it's guaranteed that the current character knows it
+							knownShell = state1.nextShell;
+							dealerTarget = knownShell.get() == ShellType.live
+								? Character.player
+								: Character.dealer;
+							dealerKnowsShell = true;
+						}
+
+						if (state1.totalShells == 1)
+						{
+							knownShell = state1.shells[ShellType.live]
+								? ShellType.live
+								: ShellType.blank;
+							dealerTarget = knownShell.get() == ShellType.live
+								? Character.player
+								: Character.dealer;
+							dealerKnowsShell = true;
+						}
+
+						// The real AI actually iterates over items using a hidden internal order
+						// (order that items were acquired).
+						// To be safe, assume an order which is most inconvenient for us.
+						Move[enumLength!Item] itemOptions; size_t numItemOptions;
+						if (state1.items[state1.currentTurn][Item.lookingGlass] && !dealerKnowsShell && state1.totalShells != 1)
+							itemOptions[numItemOptions++] = Move.useLookingGlass;
+						if (state1.items[state1.currentTurn][Item.cigarettePack] && state1.health[state1.currentTurn] < dealerCanHeal)
+							itemOptions[numItemOptions++] = Move.useCigarettePack;
+						if (state1.items[state1.currentTurn][Item.beer] && knownShell != ShellType.live.nullable && state1.totalShells != 1)
+							itemOptions[numItemOptions++] = Move.useBeer;
+						if (state1.items[state1.currentTurn][Item.handcuffs] && state1.handcuffs[state1.currentTurn.other] == HandcuffState.none && state1.totalShells != 1)
+							itemOptions[numItemOptions++] = Move.useHandcuffs;
+						if (state1.items[state1.currentTurn][Item.handSaw] && !state1.shotgunSawedOff && knownShell == ShellType.live.nullable)
+							itemOptions[numItemOptions++] = Move.useHandSaw;
+						if (numItemOptions)
+							return driver.choice!Move(
+								ChoiceMode.unknown,
+								() => "The dealer will use an item...",
+								move => tryMove(state1, move),
+								move => getMoveDescription(move, Character.dealer),
+								itemOptions[0 .. numItemOptions]
+							);
+
+						if (state1.items[state1.currentTurn][Item.handSaw] && !state1.shotgunSawedOff && knownShell != nullable(ShellType.blank))
+							return coinFlip!Move(
+								move => tryMove(state1, move),
+								move => getMoveDescription(move, Character.dealer),
+								Move.shootSelf, Move.useHandSaw,
+							);
+
+						if (dealerTarget.isNull)
+							return coinFlip!Move(
+								move => tryMove(state1, move),
+								move => getMoveDescription(move, Character.dealer),
+								Move.shootSelf, Move.shootOther,
+							);
+						else
+						{
+							auto move = dealerTarget.get() == Character.dealer ? Move.shootSelf : Move.shootOther;
+							return tryMove(state1, move);
+						}
 					}
 
-
-					// Simulate game AI
-					Nullable!Character dealerTarget;
-					Nullable!ShellType knownShell;
-					bool dealerKnowsShell;
-
-					if (!state1.nextShell.isNull)
-					{
-						// If it's resolved, it's guaranteed that the current character knows it
-						knownShell = state1.nextShell;
-						dealerTarget = knownShell.get() == ShellType.live
-							? Character.player
-							: Character.dealer;
-						dealerKnowsShell = true;
-					}
-
-					if (state1.totalShells == 1)
-					{
-						knownShell = state1.shells[ShellType.live]
-							? ShellType.live
-							: ShellType.blank;
-						dealerTarget = knownShell.get() == ShellType.live
-							? Character.player
-							: Character.dealer;
-						dealerKnowsShell = true;
-					}
-
-					// The real AI actually iterates over items using a hidden internal order
-					// (order that items were acquired).
-					// To be safe, assume an order which is most inconvenient for us.
-					Move[enumLength!Item] itemOptions; size_t numItemOptions;
-					if (state1.items[state1.currentTurn][Item.lookingGlass] && !dealerKnowsShell && state1.totalShells != 1)
-						itemOptions[numItemOptions++] = Move.useLookingGlass;
-					if (state1.items[state1.currentTurn][Item.cigarettePack] && state1.health[state1.currentTurn] < dealerCanHeal)
-						itemOptions[numItemOptions++] = Move.useCigarettePack;
-					if (state1.items[state1.currentTurn][Item.beer] && knownShell != ShellType.live.nullable && state1.totalShells != 1)
-						itemOptions[numItemOptions++] = Move.useBeer;
-					if (state1.items[state1.currentTurn][Item.handcuffs] && state1.handcuffs[state1.currentTurn.other] == HandcuffState.none && state1.totalShells != 1)
-						itemOptions[numItemOptions++] = Move.useHandcuffs;
-					if (state1.items[state1.currentTurn][Item.handSaw] && !state1.shotgunSawedOff && knownShell == ShellType.live.nullable)
-						itemOptions[numItemOptions++] = Move.useHandSaw;
-					if (numItemOptions)
-						return driver.choice!Move(
-							ChoiceMode.worst,
-							() => "The dealer will use an item...",
-							move => tryMove(state1, move),
-							move => getMoveDescription(move, Character.dealer),
-							itemOptions[0 .. numItemOptions]
-						);
-
-					if (state1.items[state1.currentTurn][Item.handSaw] && !state1.shotgunSawedOff && knownShell != nullable(ShellType.blank))
-						return coinFlip!Move(
-							move => tryMove(state1, move),
-							move => getMoveDescription(move, Character.dealer),
-							Move.shootSelf, Move.useHandSaw,
-						);
-
-					if (dealerTarget.isNull)
-						return coinFlip!Move(
-							move => tryMove(state1, move),
-							move => getMoveDescription(move, Character.dealer),
-							Move.shootSelf, Move.shootOther,
-						);
+					// Resolve if dealer can heal here
+					if (state0.items[state0.currentTurn][Item.cigarettePack])
+						return resolveCanHealTo(state0, cast(ubyte)(state0.health[state0.currentTurn] + 1), (State state1, bool result) { return dealerAI(state1, result); });
 					else
-					{
-						auto move = dealerTarget.get() == Character.dealer ? Move.shootSelf : Move.shootOther;
-						return tryMove(state1, move);
-					}
-				}
-
-				// Resolve if dealer can heal here
-				if (state0.items[state0.currentTurn][Item.cigarettePack])
-					return resolveCanHealTo(state0, cast(ubyte)(state0.health[state0.currentTurn] + 1), (State state1, bool result) { return dealerAI(state1, result); });
-				else
-					return dealerAI(state0, false);
+						return dealerAI(state0, false);
 			}
 	}
 }
@@ -506,5 +520,102 @@ unittest
 	Game game;
 	TestDriver driver;
 	if (false)
-		expand(game, driver);
+		expand(game, driver, Opponent.game);
+}
+
+/// Standard `Driver.choice` implementation.
+Score graphChoice(T)(
+	ChoiceMode mode,
+	scope string delegate() description,
+	scope Score delegate(T) getScore,
+	scope string delegate(T) getDescription,
+	scope T[] items...
+) {
+	final switch (mode)
+	{
+		case ChoiceMode.random:
+			Score sum = 0;
+			size_t total = 0;
+			foreach (item; items)
+			{
+				auto itemScore = getScore(item);
+				if (!itemScore.isNaN)
+				{
+					sum += itemScore;
+					total ++;
+				}
+			}
+			return sum / total;
+
+		case ChoiceMode.randomWithDuplicates:
+			static if (is(T == bool))
+				enum size_t card = 2;
+			else
+			static if (is(T == enum))
+				enum size_t card = enumLength!T;
+			else
+				enum size_t card = 0;
+			static if (card)
+			{
+				size_t[card] counts;
+				foreach (item; items)
+					counts[item]++;
+
+				Score sum = 0;
+				size_t total = 0;
+				foreach (index; 0 .. card)
+				{
+					auto item = cast(T)index;
+					auto count = counts[index];
+
+					auto itemScore = getScore(item);
+					if (!itemScore.isNaN)
+					{
+						sum += itemScore * count;
+						total += count;
+					}
+				}
+				return sum / total;
+
+			}
+			else
+				assert(false);
+
+		case ChoiceMode.best:
+			Score bestScore = -Score.max;
+			foreach (item; items)
+			{
+				auto itemScore = getScore(item);
+				if (itemScore > bestScore) // Comparison with NaN will yield false
+					bestScore = itemScore;
+			}
+			assert(bestScore != -Score.max, "All choices are invalid");
+			return bestScore;
+
+		case ChoiceMode.worst:
+		case ChoiceMode.unknown:
+			Score worstScore = Score.max;
+			foreach (item; items)
+			{
+				auto itemScore = getScore(item);
+				if (itemScore < worstScore) // Comparison with NaN will yield false
+					worstScore = itemScore;
+			}
+			assert(worstScore != Score.max, "All choices are invalid");
+			return worstScore;
+	}
+}
+
+unittest
+{
+	struct Driver
+	{
+		void log(scope string delegate() message) nothrow @nogc {}
+		Score recurse(const ref Game game) nothrow @nogc { return 0; }
+		alias choice = graphChoice;
+	}
+
+	Game game;
+	Driver driver;
+	expand(game, driver, Opponent.game);
 }
