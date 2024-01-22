@@ -124,6 +124,19 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 	{
 		state.currentTurn = state.currentTurn.other;
 		driver.log(() => "It is now " ~ (state.currentTurn == Character.player ? "your" : "the dealer's") ~ " turn.");
+
+		if (state.handcuffs[state.currentTurn] == HandcuffState.willSkip)
+		{
+			driver.log(() => state.currentTurn == Character.player
+				? "You are handcuffed and skip your turn."
+				: "The dealer is handcuffed and skips their turn."
+			);
+			if (state.totalShells == 0)
+				driver.log(() => "(It doesn't matter, the round is ending.)");
+			state.handcuffs[state.currentTurn] = HandcuffState.willBreak;
+			return switchTurn(state);
+		}
+
 		if (state.handcuffs[state.currentTurn] == HandcuffState.willBreak)
 		{
 			driver.log(() => (state.currentTurn == Character.player ? "Your" : "The dealer's") ~ " handcuffs break off.");
@@ -401,17 +414,7 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 		);
 	}
 
-	if (state0.handcuffs[state0.currentTurn] == HandcuffState.willSkip)
-	{
-		State state1 = state0;
-		driver.log(() => state1.currentTurn == Character.player
-			? "You are handcuffed and skip your turn."
-			: "The dealer is handcuffed and skips their turn."
-		);
-		state1.handcuffs[state1.currentTurn] = HandcuffState.willBreak;
-		switchTurn(state1);
-		return driver.recurse(state1);
-	}
+	assert(!state0.handcuffs[state0.currentTurn]);
 
 	final switch (state0.currentTurn)
 	{

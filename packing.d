@@ -37,11 +37,10 @@ alias PackedItems = WithMax!(PackedItemsBase, packedItemsCard - 1);
 
 alias PackedHealth = WithMax!(ubyte, 3); // min == 1 !
 
-enum PackedHandcuffState : ubyte { none, currentWillSkip, otherWillSkip, otherWillBreak }
+enum PackedHandcuffState : ubyte { none, otherWillSkip, otherWillBreak }
 immutable HandcuffState[2][enumLength!PackedHandcuffState] packedHandcuffStates = [
 	/* [current, other] */
 	[HandcuffState.none, HandcuffState.none],
-	[HandcuffState.willSkip, HandcuffState.none],
 	[HandcuffState.none, HandcuffState.willSkip],
 	[HandcuffState.none, HandcuffState.willBreak],
 ];
