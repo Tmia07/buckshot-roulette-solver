@@ -10,7 +10,7 @@ import std.stdio : File, stderr;
 
 import ae.sys.data;
 import ae.sys.datamm;
-import ae.sys.file : truncate, atomic;
+import ae.sys.file : truncate, atomic, atomicExchange;
 import ae.utils.meta;
 import ae.utils.text;
 
@@ -100,37 +100,42 @@ void generateScoreFile(Opponent opponent)
 		atomic!createFile(fn);
 	}
 
-	for (size_t iter = 0; ; iter++)
+	bool stop = false;
+	for (size_t iter = 0; !stop; iter++)
 	{
 		writeln("Iteration #", iter);
 
-		auto currentData = mapFile(fn, MmMode.read).asDataOf!PackedScore;
-		auto current = currentData.unsafeContents;
-
 		auto nextFn = fn ~ "-next";
-		File(nextFn, "wb").truncate(packedGameCard * PackedScore.sizeof);
+		{
+			auto currentData = mapFile(fn, MmMode.read).asDataOf!PackedScore;
+			auto current = currentData.unsafeContents;
 
-		auto nextData = mapFile(nextFn, MmMode.readWrite).asDataOf!PackedScore;
-		auto next = nextData.unsafeContents;
+			File(nextFn, "ab").truncate(packedGameCard * PackedScore.sizeof);
 
-		propagateScores(current, next, opponent);
+			auto nextData = mapFile(nextFn, MmMode.readWrite).asDataOf!PackedScore;
+			auto next = nextData.unsafeContents;
 
-		auto totalChange = zip(current, next).map!(pair => abs(int(pair[0].value) - pair[1].value)).sum;
-		auto maxChange = zip(current, next).map!(pair => abs(int(pair[0].value) - pair[1].value)).reduce!max;
-		auto numChanged = zip(current, next).map!(pair => pair[0] == pair[1] ? 1L : 0L).sum;
-		// auto crc = crc32Of(table);
-		auto changeLimit = 1;
-		writeln(" > Change: num=", numChanged, " / ", packedGameCard,
-			", total=", totalChange,
-			", avg=", (double(totalChange) / packedGameCard).fpToString,
-			", max=", maxChange, " / ", changeLimit,
-			// ", CRC=", crc[].format!"%(%02x%)",
-		);
+			propagateScores(current, next, opponent);
 
-		if (maxChange <= changeLimit)
-		// if (crc in sawCRC)
-			break;
-		// sawCRC[crc] = true;
+			auto totalChange = zip(current, next).map!(pair => abs(int(pair[0].value) - pair[1].value)).sum;
+			auto maxChange = zip(current, next).map!(pair => abs(int(pair[0].value) - pair[1].value)).reduce!max;
+			auto numChanged = zip(current, next).map!(pair => pair[0] == pair[1] ? 1L : 0L).sum;
+			// auto crc = crc32Of(table);
+			auto changeLimit = 1;
+			writeln(" > Change: num=", numChanged, " / ", packedGameCard,
+				", total=", totalChange,
+				", avg=", (double(totalChange) / packedGameCard).fpToString,
+				", max=", maxChange, " / ", changeLimit,
+				// ", CRC=", crc[].format!"%(%02x%)",
+			);
+
+			if (maxChange <= changeLimit)
+			// if (crc in sawCRC)
+				stop = true;
+			// sawCRC[crc] = true;
+		}
+
+		atomicExchange(fn, nextFn);
 	}
 	stderr.writeln("Change threshold reached.");
 }
