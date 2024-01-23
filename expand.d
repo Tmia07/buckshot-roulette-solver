@@ -361,7 +361,8 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 												{
 													if (itemIndex == grantedItemsCT)
 													{
-														auto sortedItems = items;
+														// `dup` for https://issues.dlang.org/show_bug.cgi?id=24354
+														/*Item*/ubyte[grantedItemsCT] sortedItems = items.dup;
 														sortedItems[].sort();
 														result ~= cast(PackedItems)ItemCNS.pack(sortedItems);
 													}
