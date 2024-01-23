@@ -1,5 +1,6 @@
 import std.algorithm.comparison;
 import std.algorithm.iteration;
+import std.algorithm.mutation;
 import std.conv;
 import std.exception;
 import std.file;
@@ -160,26 +161,14 @@ struct JSProblem
 
 struct JSAnalysis
 {
-	Score baseScore;
+	JSGame game;
+	string packedGame;
 
 	struct Event
 	{
 		@JSONOptional string message;
 
-		struct Choice
-		{
-			string description;
-			ChoiceMode mode;
-			struct Option
-			{
-				size_t index; // may not correspond to `options` index after deduplication
-				string description;
-				Score outcome;
-			}
-			Option[] options;
-			Nullable!size_t selectedOption; // This one is an index into `options`.
-		}
-		@JSONOptional Choice choice;
+		@JSONOptional Nullable!Score start;
 
 		struct Recursion
 		{
@@ -188,6 +177,22 @@ struct JSAnalysis
 			Score score;
 		}
 		@JSONOptional Recursion recursion;
+
+		struct Choice
+		{
+			string description;
+			ChoiceMode mode;
+			struct Option
+			{
+				size_t[] decisions; // all decisions up to this point including this one, starting with `game`. Put this in `JSProblem.decisions`.
+				string description;
+				Score outcome;
+				@JSONOptional Nullable!double probability; // Only when non-uniform random
+			}
+			Option[] options;
+			@JSONOptional Nullable!size_t selectedOption; // This one is an index into `options`.
+		}
+		@JSONOptional Choice choice;
 
 		@JSONOptional Nullable!bool gameOver;
 	}
@@ -218,16 +223,36 @@ void main(string[] args)
 		{
 			if (!interactive)
 				return;
+			if (decisions.length < problem.decisions.length)
+				return;
 
 			JSAnalysis.Event event;
 			event.message = message();
 			analysis.events ~= event;
 		}
 
+		Score run(const ref Game game)
+		{
+			assert(interactive);
+			if (decisions.length < problem.decisions.length)
+				return expand.expand(game, &this, problem.opponent);
+
+			JSAnalysis.Event event;
+			size_t eventIndex = analysis.events.length;
+			analysis.events ~= event;
+
+			auto score = expand.expand(game, &this, problem.opponent);
+			analysis.events[eventIndex].start = score;
+
+			return score;
+		}
+
 		Score recurse(const ref Game game)
 		{
 			if (!interactive)
 				return scores[game.packGame()].unpackScore;
+			if (decisions.length < problem.decisions.length)
+				return expand.expand(game, &this, problem.opponent);
 
 			auto jsGame = JSGame(game, recursedGames[$-1]);
 			recursedGames ~= jsGame;
@@ -325,13 +350,24 @@ void main(string[] args)
 				option.score = getScore(option.item);
 			}
 
+			foreach_reverse (optionIndex, ref option; options)
+				if (option.score.isNaN)
+					options = options.remove(optionIndex);
+
+			auto includeProbabilities = mode == ChoiceMode.randomWithDuplicates;
+
 			foreach (ref option; options)
-				if (!option.score.isNaN)
-					event.choice.options ~= JSAnalysis.Event.Choice.Option(
-						option.index,
-						getDescription(option.item),
-						option.score,
-					);
+			{
+				assert(option.count);
+				auto jsOption = JSAnalysis.Event.Choice.Option(
+					decisions ~ option.index,
+					getDescription(option.item),
+					option.score,
+				);
+				if (includeProbabilities)
+					jsOption.probability = 1.0 * option.count / items.length;
+				event.choice.options ~= jsOption;
+			}
 
 			Nullable!size_t selectedOption;
 			Score score = {
@@ -374,6 +410,9 @@ void main(string[] args)
 				}
 			}();
 
+			if (selectedOption.isNull && options.length == 1)
+				selectedOption = 0;
+
 			event.choice.selectedOption = selectedOption;
 			analysis.events ~= event;
 
@@ -400,21 +439,22 @@ void main(string[] args)
 			return graphGameOver(playerWon);
 		}
 	}
-	auto driver = Driver();
-	{
-		auto jsGame = problem.packedGame
-			? problem.packedGame.to!PackedGame.unpackGame().JSGame(JSGame.init)
-			: problem.game;
-		driver.recursedGames = [jsGame];
-	}
+
+	auto jsGame = problem.packedGame
+		? problem.packedGame.to!PackedGame.unpackGame().JSGame(JSGame.init)
+		: problem.game;
 
 	Game game;
 	if (problem.packedGame)
 		game = problem.packedGame.to!PackedGame.unpackGame();
 	else
 		game = problem.game.toGame();
-	auto result = expand.expand(game, &driver, problem.opponent);
-	analysis.baseScore = result;
+	analysis.game = jsGame;
+	analysis.packedGame = game.packGame().to!string;
+
+	auto driver = Driver();
+	driver.recursedGames = [jsGame];
+	driver.run(game);
 
 	// auto scores = new RemoteScores(problem.opponent);
 	// Analysis analysis;

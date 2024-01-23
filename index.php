@@ -10,7 +10,15 @@
 <div id="page">
 	<!-- <object id="game" data="board.svg?<?php echo(filemtime("board.svg")) ?>"></object> -->
 	<?php readfile('board.svg'); ?>
-	<div id="explorer"></div>
+	<div id="explorer">
+		<table>
+			<tr id="explorer-header">
+				<th></th>
+				<th>Analysis</th>
+				<th>Win %</th>
+			</tr>
+		</table>
+	</div>
 </div>
 
 <!--

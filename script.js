@@ -172,6 +172,120 @@ document.addEventListener('DOMContentLoaded', function() {
 
 // const trayDieIndex = numDice - 1;
 
+const winPercentFormatter = new Intl.NumberFormat('en-US', {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+  style: 'percent'
+});
+const choiceProbabilityFormatter = new Intl.NumberFormat('en-US', {
+  maximumFractionDigits: 0,
+  style: 'percent'
+});
+
+var choiceCounter = 0;
+
+function addAnalysis(data, rowAfter) {
+	while (rowAfter.nextSibling)
+		rowAfter.nextSibling.remove();
+
+	function addEvent(icon, text, winPercent) {
+		let tr = document.createElement('TR');
+		let td0 = document.createElement('TD');
+		td0.textContent = icon;
+		tr.appendChild(td0);
+		let td1 = document.createElement('TD');
+		if (typeof text === 'string')
+			td1.textContent = text;
+		else
+			td1.appendChild(text);
+		tr.appendChild(td1);
+		let td2 = document.createElement('TD');
+		if (winPercent !== undefined && winPercent !== null)
+			td2.textContent = winPercentFormatter.format(winPercent);
+		tr.appendChild(td2);
+		rowAfter.parentElement.appendChild(tr);
+		return tr;
+	}
+
+	for (let event of data.events) {
+		if ('message' in event)
+			addEvent('ℹ️', event.message);
+		else
+		if ('start' in event)
+			addEvent('🚀', 'Analyzing Game #' + data.packedGame + '.', event.start);
+		else
+		if ('choice' in event) {
+			choiceCounter++;
+			let icon =
+				event.choice.mode == 'best' ? '🤔' :
+				event.choice.mode == 'worst' ? '🖥️' :
+				event.choice.mode == 'random' ? '🎲' :
+				event.choice.mode == 'randomWithDuplicates' ? '🎲' :
+				event.choice.mode == 'unknown' ? '❓' :
+				'';
+			addEvent(icon,
+					 event.choice.description,
+					 'selectedOption' in event.choice
+					 ? event.choice.options[event.choice.selectedOption].outcome
+					 : undefined);
+			let lastRow;
+			for (let i = 0; i < event.choice.options.length; i++) {
+				let option = event.choice.options[i];
+				let description = option.description;
+				if ('probability' in option)
+					description = '[' + choiceProbabilityFormatter.format(option.probability) + '] ' + description;
+				let label = document.createElement('LABEL');
+				let radio = document.createElement('INPUT');
+				radio.type = 'radio';
+				radio.name = 'choice-' + choiceCounter;
+				radio.id = 'choice-' + choiceCounter + '-' + i;
+				radio.value = i;
+				// TODO onclick
+				if ('selectedOption' in event.choice && i == event.choice.selectedOption)
+					radio.checked = 'checked';
+				label.for = radio.id;
+				label.appendChild(radio);
+				label.appendChild(document.createTextNode(description));
+				radio.addEventListener('change', function() {
+					const problem = {
+						// opponent: document.getElementById('opponent').value,
+						game: data.game,
+						decisions: option.decisions,
+					};
+					fetch('websolver.php', {
+						method: 'POST',
+						headers: {
+							'Content-Type': 'application/json',
+						},
+						body: JSON.stringify(problem),
+					})
+					.then((response) => response.json())
+					.then((data) => {
+						if ('error' in data)
+							throw new Error('data error');
+						addAnalysis(
+							data,
+							lastRow,
+						);
+					})
+					.catch((error) => {
+						console.log(error);
+					});
+				});
+				lastRow = addEvent('➡️', label, option.outcome);
+			}
+		}
+		else
+		if ('recursion' in event) {
+			addEvent('📍', 'Checkpoint: Game #' + event.recursion.packedGame + '.', event.recursion.score);
+		}
+		else
+		if ('gameOver' in event) {
+			addEvent(event.gameOver ? '✌️' : '💀', 'Game over.', event.gameOver ? 1 : 0);
+		}
+	}
+}
+
 let boardVersion = 0;
 
 function validate(now) {
@@ -292,6 +406,11 @@ function validate(now) {
 				return; // outdated
 			if ('error' in data)
 				throw new Error('data error'); // TODO
+
+			addAnalysis(
+				data,
+				document.getElementById('explorer-header'),
+			);
 			// document.getElementById('status-loading').style.display = 'none';
 			// if (data.bestMoves.length == 0) {
 			// 	const nodie = document.getElementById('status-nodie');
@@ -360,7 +479,7 @@ function validate(now) {
 // 	}
 // }
 
-// (function() {
+(function() {
 // 	for (let dieIndex = 0; dieIndex < numDice; dieIndex++) {
 // 		const die = getDie(dieIndex);
 // 		setDieValue(dieIndex, 0);
@@ -435,31 +554,32 @@ function validate(now) {
 // 		}
 // 	});
 
-// 	const game = document.getElementById('game');
-// 	const gameStyle = window.getComputedStyle(game);
-// 	const numUIColumns = gameStyle.gridTemplateColumns.split(' ').length;
-// 	const numUIRows = gameStyle.gridTemplateRows.split(' ').length;  // same as aspect-ratio / #game grid-template
-// 	const haveAspectRatio = 'aspectRatio' in gameStyle;
+	const page = document.getElementById('page');
+	const pageStyle = window.getComputedStyle(page);
+// 	const numUIColumns = pageStyle.gridTemplateColumns.split(' ').length;
+// 	const numUIRows = pageStyle.gridTemplateRows.split(' ').length;  // same as aspect-ratio / #page grid-template
+	const haveAspectRatio = 'aspectRatio' in pageStyle;
 
-// 	function updateSize() {
-// 		// Work around no support of aspect-ratio CSS property
-// 		// in Steam's in-game browser
-// 		if (!haveAspectRatio) {
-// 			const unitSize = Math.min(
-// 				document.documentElement.clientWidth / numUIColumns,
-// 				document.documentElement.clientHeight / numUIRows
-// 			);
-// 			game.style.width = (unitSize * numUIColumns) + 'px';
-// 			game.style.height = (unitSize * numUIRows) + 'px';
-// 		}
+	function updateSize() {
+		// // Work around no support of aspect-ratio CSS property
+		// // in Steam's in-page browser
+		// if (!haveAspectRatio) {
+		// 	const unitSize = Math.min(
+		// 		document.documentElement.clientWidth / numUIColumns,
+		// 		document.documentElement.clientHeight / numUIRows
+		// 	);
+		// 	page.style.width = (unitSize * numUIColumns) + 'px';
+		// 	page.style.height = (unitSize * numUIRows) + 'px';
+		// }
 
-// 		// Make it so that 2em == one grid tile.
-// 		// (Maybe one day this will be doable in CSS...)
-// 		game.style.fontSize = (game.clientHeight / 2 / numUIRows) + 'px';
+		// Make it so that 2em == one grid tile.
+		// (Maybe one day this will be doable in CSS...)
+		// page.style.fontSize = (page.clientWidth / 2 / numUIRows) + 'px';
+		page.style.fontSize = (page.clientWidth / 48) + 'px';
 
-// 		window.requestAnimationFrame(updateSize);
-// 	}
-// 	updateSize();
+		window.requestAnimationFrame(updateSize);
+	}
+	updateSize();
 
 // 	var helpVisible = false;
 // 	document.getElementById('help').addEventListener('click', function() {
@@ -467,4 +587,4 @@ function validate(now) {
 // 		document.getElementById('help-page').style.display = helpVisible ? "block" : "none";
 // 		document.querySelector('#help div').textContent = helpVisible ? '×' : '?';
 // 	});
-// })();
+})();
