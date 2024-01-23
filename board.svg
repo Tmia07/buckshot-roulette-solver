@@ -1,0 +1,115 @@
+<svg version="1.1" xmlns="http://www.w3.org/2000/svg" viewBox="3 -4 60 72">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Noto+Color+Emoji&amp;display=swap');
+
+    svg { fill: white; stroke: black; }
+    text { stroke: none; font-family: "Noto Color Emoji"; }
+
+    .demo { display: none; }
+  </style>
+
+  <defs>
+    <g id="bg-item"    ><rect width="8" height="12" fill="inherit" stroke="inherit" stroke-width="0.5" /></g>
+    <g id="item-lookingGlass"  ><text x="4" y="6" style="font-size: 6px; text-anchor: middle; dominant-baseline: central">🔍</text></g>
+    <g id="item-handcuffs"     ><text x="4" y="6" style="font-size: 6px; text-anchor: middle; dominant-baseline: central">🔗</text></g>
+    <g id="item-beer"          ><text x="4" y="6" style="font-size: 6px; text-anchor: middle; dominant-baseline: central">🍺</text></g>
+    <g id="item-cigarettePack" ><text x="4" y="6" style="font-size: 6px; text-anchor: middle; dominant-baseline: central">🚬</text></g>
+    <g id="item-handSaw"       ><text x="4" y="6" style="font-size: 6px; text-anchor: middle; dominant-baseline: central">🪚</text></g>
+
+    <g id="bg-shell"   ><rect width="2" height="4" fill="inherit" stroke="inherit" stroke-width="0.5" /></g>
+    <g id="shell-blank">
+      <rect x="0.5" y="0.5" width="1" height="2.5" fill="#667" stroke="black" stroke-width="0.25" />
+      <rect x="0.5" y="3.0" width="1" height="0.5" fill="#765" stroke="black" stroke-width="0.25" />
+    </g>
+    <g id="shell-live">
+      <rect x="0.5" y="0.5" width="1" height="2.5" fill="#a55" stroke="black" stroke-width="0.25" />
+      <rect x="0.5" y="3.0" width="1" height="0.5" fill="#765" stroke="black" stroke-width="0.25" />
+    </g>
+    <g id="shell-unknown">
+      <text x="1" y="2" style="font-size: 2px; text-anchor: middle; dominant-baseline: central">❓</text>
+    </g>
+
+    <g id="bg-handcuffs"><rect width="8" height="6" fill="inherit" stroke="inherit" stroke-width="0.5" /></g>
+    <g id="handcuffs-willSkip" ><text x="4" y="3" style="font-size: 4px; text-anchor: middle; dominant-baseline: central">🔗</text></g>
+    <g id="handcuffs-willBreak"><text x="4" y="3" style="font-size: 4px; text-anchor: middle; dominant-baseline: central">⛓️‍💥</text></g>
+
+    <g id="bg-barrel"  ><rect width="1" height="6" fill="inherit" stroke="inherit" stroke-width="0.5" /></g>
+    <g id="barrel-cutoff"      ><text x="0.5" y="3" style="font-size: 4px; text-anchor: middle; dominant-baseline: central">❌</text></g>
+
+    <g id="hp-on" ><path stroke="none" fill="black" d="M -1,0 h 0.8 l 0.2 -0.4 l 1 0.4 h -0.8 l -0.2 0.4"/></g>
+    <g id="hp-off"><path stroke="none" fill="#bbb"  d="M -1,0 h 0.8 l 0.2 -0.4 l 1 0.4 h -0.8 l -0.2 0.4"/></g>
+    <g id="bg-health"  ><rect width="4" height="7" fill="inherit" stroke="inherit" stroke-width="0.5" /></g>
+    <g id="health-1">
+      <use transform="translate( 2, 2)" href="#hp-on" />
+      <use transform="translate( 2, 3)" href="#hp-off" />
+      <use transform="translate( 2, 4)" href="#hp-off" />
+      <use transform="translate( 2, 5)" href="#hp-off" />
+    </g>
+    <g id="health-2">
+      <use transform="translate( 2, 2)" href="#hp-on" />
+      <use transform="translate( 2, 3)" href="#hp-on" />
+      <use transform="translate( 2, 4)" href="#hp-off" />
+      <use transform="translate( 2, 5)" href="#hp-off" />
+    </g>
+    <g id="health-3">
+      <use transform="translate( 2, 2)" href="#hp-on" />
+      <use transform="translate( 2, 3)" href="#hp-on" />
+      <use transform="translate( 2, 4)" href="#hp-on" />
+      <use transform="translate( 2, 5)" href="#hp-off" />
+    </g>
+    <g id="health-4">
+      <use transform="translate( 2, 2)" href="#hp-on" />
+      <use transform="translate( 2, 3)" href="#hp-on" />
+      <use transform="translate( 2, 4)" href="#hp-on" />
+      <use transform="translate( 2, 5)" href="#hp-on" />
+    </g>
+  </defs>
+
+  <rect x="4" y="0" width="56" height="64" fill="#aaa" stroke="none"/>
+  <path stroke="#bbb" stroke-width="0.5" d="M 4 32 h 56"/>
+  <rect x="4" y="0" width="56" height="64" fill="none" stroke="black" stroke-width="0.5"/>
+
+  <circle cx="32" cy="32" r="23" fill="none" stroke="#bbb" stroke-width="0.5" />
+
+  <g transform="translate( 8,  4)" id="slot-item-1-0"><use href="#bg-item"/><use class="demo" href="#item-beer"/></g>
+  <g transform="translate(16,  4)" id="slot-item-1-1"><use href="#bg-item"/><use class="demo" href="#item-cigarettePack"/></g>
+  <g transform="translate( 8, 16)" id="slot-item-1-2"><use href="#bg-item"/><use class="demo" href="#item-handSaw"/></g>
+  <g transform="translate(16, 16)" id="slot-item-1-3"><use href="#bg-item"/><use class="demo" href="#item-lookingGlass"/></g>
+  <g transform="translate(40,  4)" id="slot-item-1-4"><use href="#bg-item"/><use class="demo" href="#item-handcuffs"/></g>
+  <g transform="translate(48,  4)" id="slot-item-1-5"><use href="#bg-item"/></g>
+  <g transform="translate(40, 16)" id="slot-item-1-6"><use href="#bg-item"/></g>
+  <g transform="translate(48, 16)" id="slot-item-1-7"><use href="#bg-item"/></g>
+
+  <g transform="translate( 8, 36)" id="slot-item-0-0"><use href="#bg-item"/></g>
+  <g transform="translate(16, 36)" id="slot-item-0-1"><use href="#bg-item"/></g>
+  <g transform="translate( 8, 48)" id="slot-item-0-2"><use href="#bg-item"/></g>
+  <g transform="translate(16, 48)" id="slot-item-0-3"><use href="#bg-item"/></g>
+  <g transform="translate(40, 36)" id="slot-item-0-4"><use href="#bg-item"/></g>
+  <g transform="translate(48, 36)" id="slot-item-0-5"><use href="#bg-item"/></g>
+  <g transform="translate(40, 48)" id="slot-item-0-6"><use href="#bg-item"/></g>
+  <g transform="translate(48, 48)" id="slot-item-0-7"><use href="#bg-item"/></g>
+
+  <path stroke="black" stroke-width="0.5" fill="#aaa" d="M 30,22 v 18 l 2,8 h 2 l -2,-8 v -18 h -2" />
+  <g transform="translate(30, 16)" id="slot-barrel"><use href="#bg-barrel"/><use class="demo" href="#barrel-cutoff"/></g>
+
+  <!-- <rect x="40" y="30" width="16" height="4" fill="white" stroke="black" stroke-width="0.5" /> -->
+  <g transform="translate(40, 30)" id="slot-shell-0"><use href="#bg-shell"/><use class="demo" href="#shell-blank"/></g>
+  <g transform="translate(42, 30)" id="slot-shell-1"><use href="#bg-shell"/><use class="demo" href="#shell-live"/></g>
+  <g transform="translate(44, 30)" id="slot-shell-2"><use href="#bg-shell"/></g>
+  <g transform="translate(46, 30)" id="slot-shell-3"><use href="#bg-shell"/></g>
+  <g transform="translate(48, 30)" id="slot-shell-4"><use href="#bg-shell"/></g>
+  <g transform="translate(50, 30)" id="slot-shell-5"><use href="#bg-shell"/></g>
+  <g transform="translate(52, 30)" id="slot-shell-6"><use href="#bg-shell"/></g>
+  <g transform="translate(54, 30)" id="slot-shell-7"><use href="#bg-shell"/></g>
+
+  <g transform="translate(30, 30)" id="slot-shell-next"><use href="#bg-shell"/><use class="demo" href="#shell-unknown"/></g>
+
+  <rect x="26" y= "2" width="12" height="6" fill="none" stroke="#bbb" stroke-width="0.5" />
+  <rect x="26" y="56" width="12" height="6" fill="none" stroke="#bbb" stroke-width="0.5" />
+
+  <g transform="translate(12, -3)" id="slot-handcuffs-1"><use href="#bg-handcuffs"/><use class="demo" href="#handcuffs-willSkip"/></g>
+  <g transform="translate(12, 61)" id="slot-handcuffs-0"><use href="#bg-handcuffs"/><use class="demo" href="#handcuffs-willBreak"/></g>
+
+  <g transform="translate(58, 25)            " id="slot-health-1"><use href="#bg-health"/><use class="demo" href="#health-4"/></g>
+  <g transform="translate(62, 39) rotate(180)" id="slot-health-0"><use href="#bg-health"/><use class="demo" href="#health-1"/></g>
+</svg>

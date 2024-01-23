@@ -204,10 +204,10 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 						{
 							case Character.player:
 								driver.log(() => "You are out. You lose!");
-								return scoreLose;
+								return driver.gameOver(false);
 							case Character.dealer:
 								driver.log(() => "The dealer is out. You win!");
-								return scoreWin;
+								return driver.gameOver(true);
 						}
 					switchTurn(newState);
 					break;
@@ -560,12 +560,29 @@ unittest
 			scope string delegate(T) getDescription,
 			scope const(T)[] items...
 		) { assert(false); }
+
+		/// End condition.
+		Score gameOver(bool playerWon) nothrow @nogc { return playerWon ? scoreWin : scoreLose; }
 	}
 
 	Game game;
 	TestDriver driver;
 	if (false)
 		expand(game, driver, Opponent.game);
+}
+
+template itemCardinality(T)
+{
+	static if (is(T == bool))
+		enum size_t itemCardinality = 2;
+	else
+	static if (is(T == enum))
+		enum size_t itemCardinality = enumLength!T;
+	else
+	static if (is(T == ubyte))
+		enum size_t itemCardinality = 256;
+	else
+		enum size_t itemCardinality = 0;
 }
 
 /// Standard `Driver.choice` implementation.
@@ -593,16 +610,7 @@ Score graphChoice(T)(
 			return sum / total;
 
 		case ChoiceMode.randomWithDuplicates:
-			static if (is(T == bool))
-				enum size_t card = 2;
-			else
-			static if (is(T == enum))
-				enum size_t card = enumLength!T;
-			else
-			static if (is(T == ubyte))
-				enum size_t card = 256;
-			else
-				enum size_t card = 0;
+			enum card = itemCardinality!T;
 			static if (card)
 			{
 				size_t[card] counts;
@@ -656,6 +664,8 @@ Score graphChoice(T)(
 	}
 }
 
+Score graphGameOver(bool playerWon) nothrow @nogc { return playerWon ? scoreWin : scoreLose; }
+
 unittest
 {
 	struct Driver
@@ -663,6 +673,7 @@ unittest
 		void log(scope string delegate() message) nothrow @nogc {}
 		Score recurse(const ref Game game) nothrow @nogc { return 0; }
 		alias choice = graphChoice;
+		alias gameOver = graphGameOver;
 	}
 
 	Game game;

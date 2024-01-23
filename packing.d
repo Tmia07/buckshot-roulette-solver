@@ -167,6 +167,7 @@ void main()
 			}
 
 			alias choice = graphChoice;
+			alias gameOver = graphGameOver;
 		}
 		auto driver = Driver();
 

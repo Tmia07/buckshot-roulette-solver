@@ -1,0 +1,28 @@
+* {
+	box-sizing: border-box;
+}
+
+body {
+	margin: 0;
+	padding: 0;
+
+	height: 100vh;
+	position: relative;
+	font-family: sans-serif;
+
+	background-color: #444;
+	color: #fff;
+}
+
+#page {
+	height: 100vh;
+	display: grid;
+	align-items: center;
+	grid-template: 1fr / 5fr 3fr;
+}
+
+#game {
+}
+
+#explorer {
+}

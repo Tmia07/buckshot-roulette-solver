@@ -60,6 +60,7 @@ void propagateScores(const ScoreTable source, ScoreTable target, Opponent oppone
 		}
 
 		alias choice = graphChoice;
+		alias gameOver = graphGameOver;
 	}
 	auto driver = Driver();
 
