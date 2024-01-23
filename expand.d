@@ -37,8 +37,8 @@ string getMoveDescription(Move move, Character who)
 {
 	final switch (move)
 	{
-		case Move.shootSelf       : return who == Character.player ? "Shoot yourself" : "Shoot themselves";
-		case Move.shootOther      : return who == Character.player ? "Shoot you" : "Shoot the dealer";
+		case Move.shootSelf       : return who == Character.player ? "Shoot yourself"   : "Shoot themselves";
+		case Move.shootOther      : return who == Character.player ? "Shoot the dealer" : "Shoot you";
 		case Move.useLookingGlass : return "Use a Looking Glass";
 		case Move.useHandcuffs    : return "Use Handcuffs";
 		case Move.useBeer         : return "Use a Beer";
