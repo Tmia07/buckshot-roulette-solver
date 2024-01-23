@@ -124,7 +124,7 @@ void generateScoreFile(Opponent opponent)
 
 			auto totalChange = zip(current, next).map!(pair => abs(long(pair[0].value) - pair[1].value)).sum;
 			auto maxChange = zip(current, next).map!(pair => abs(int(pair[0].value) - pair[1].value)).reduce!max;
-			auto numChanged = zip(current, next).map!(pair => pair[0] == pair[1] ? 1L : 0L).sum;
+			auto numChanged = zip(current, next).map!(pair => pair[0] == pair[1] ? 0L : 1L).sum;
 			// auto crc = crc32Of(table);
 			auto changeLimit = 1;
 			writeln(" > Change: num=", numChanged, " / ", packedGameCard,
