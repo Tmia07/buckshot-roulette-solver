@@ -50,22 +50,6 @@ string scoreFileName(Opponent opponent)
 
 void propagateScores(const ScoreTable source, ScoreTable target, Opponent opponent)
 {
-	stderr.writeln("Copying...");
-	{
-		PackedGame numDone;
-		foreach (packedGame; packedGameCard.iota.parallel(packedGameCard / totalCPUs / 128))
-		{
-			target[packedGame] = source[packedGame];
-			enum progressPeriod = 0x1000000;
-			if (packedGame % progressPeriod == 0)
-				synchronized
-				{
-					numDone += progressPeriod;
-					stderr.write(100 * numDone / packedGameCard, "%\r"); stderr.flush();
-				}
-		}
-	}
-
 	struct Driver
 	{
 		void log(scope string delegate() message) nothrow @nogc {}
@@ -79,7 +63,6 @@ void propagateScores(const ScoreTable source, ScoreTable target, Opponent oppone
 	}
 	auto driver = Driver();
 
-	stderr.writeln("Expanding...");
 	{
 		PackedGame numDone;
 		foreach (packedGame; packedGameCard.iota.parallel(packedGameCard / totalCPUs / 128))
