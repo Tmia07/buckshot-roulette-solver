@@ -37,6 +37,15 @@ body {
 	grid-row: 1;
 	grid-column: 1;
 }
+#packed-game {
+	align-self: center;
+	justify-self: center;
+	grid-row: 1;
+	grid-column: 1;
+	display: none;
+}
+body.packed-game #board { display: none; }
+body.packed-game #packed-game { display: block; }
 
 #explorer-page {
 	grid-row: 1;

@@ -11,15 +11,19 @@ const defaultGame = {
 	shotgunSawedOff: false,
 };
 
-let currentGame = defaultGame;
+let currentGame = copyGame(defaultGame);
 let showGameFuncs = [];
 let resetGameFuncs = [];
 
 function showGame(game) {
 	document.querySelectorAll('.value').forEach(e => e.remove());
 	document.querySelectorAll('.error').forEach(e => e.style.removeProperty('fill'));
-	for (let func of showGameFuncs)
-		func(game);
+	document.body.classList.toggle('packed-game', typeof game === 'string');
+	if (typeof game === 'string')
+		document.getElementById('packed-game').textContent = 'Game #' + game;
+	else
+		for (let func of showGameFuncs)
+			func(game);
 }
 
 function copyGame(game) { return JSON.parse(JSON.stringify(game)); }
@@ -39,116 +43,6 @@ function resetBoard() {
 	for (let func of resetGameFuncs)
 		func(currentGame);
 }
-
-document.addEventListener('DOMContentLoaded', function() {
-	function addControl(type, slot, path, values, valueIDs) {
-		let slotID = 'slot-' + type + (slot !== null ? '-' + slot : '');
-		let slotNode = document.getElementById(slotID);
-		slotNode.style.cursor = 'pointer';
-
-		function getValue(game) {
-			let v = game;
-			for (let step of path)
-				v = v[step];
-			return v;
-		}
-		function setValue(game, value) {
-			let v = game;
-			for (let step of path.slice(0, -1))
-				v = v[step];
-			v[path[path.length-1]] = value;
-		}
-
-		function cycleValue(game, indexUpdateFun) {
-			let oldValue = getValue(game);
-			let oldValueIndex = values.indexOf(oldValue);
-			let newValueIndex = indexUpdateFun(oldValueIndex);
-			newValueIndex = (newValueIndex + values.length) % values.length;
-			let newValue = values[newValueIndex];
-			setValue(game, newValue);
-
-			validate();
-		}
-
-		slotNode.addEventListener('mousedown', function(event) {
-			if (event.button == 0) {
-				cycleValue(currentGame, index => index + 1);
-				event.preventDefault();
-			}
-		});
-		slotNode.addEventListener('wheel', function(event) {
-			cycleValue(currentGame, index => index + Math.sign(event.deltaX + event.deltaY));
-			event.preventDefault();
-		});
-		slotNode.addEventListener('contextmenu', function(event) {
-			cycleValue(currentGame, index => 0);
-			event.preventDefault();
-		});
-
-		showGameFuncs.push((game) => {
-			let value = getValue(game);
-			let valueIndex = values.indexOf(value);
-			if (typeof valueIDs === 'function')
-				valueIDs(value);
-			else {
-				let valueID = valueIDs[valueIndex];
-				if (valueID !== null) {
-					valueID = type + '-' + valueID;
-
-					let valueNode = document.createElementNS("http://www.w3.org/2000/svg", 'use');
-					valueNode.setAttribute('class', 'value');
-					valueNode.setAttributeNS("http://www.w3.org/1999/xlink", 'href', '#' + valueID);
-					slotNode.appendChild(valueNode);
-				}
-			}
-		});
-
-		resetGameFuncs.push((game) => {
-			cycleValue(game, index => 0);
-		});
-	}
-	addControl('handle', null, ['currentTurn'], ['player', 'dealer'], (currentTurn) => {
-		let e = document.getElementById('board');
-		e.classList.toggle('dealer-turn', currentTurn === 'dealer');
-	});
-	for (let i = 0; i < defaultGame.shells.length; i++)
-		addControl('shell', i, ['shells', i], [null, 'blank', 'live'], [null, 'blank', 'live']);
-	addControl('shell', 'next', ['nextShell'], [null, 'blank', 'live'], ['unknown', 'blank', 'live']);
-	for (let c = 0; c < defaultGame.items.length; c++)
-		for (let i = 0; i < defaultGame.items[c].length; i++)
-			addControl('item', c + '-' + i, ['items', c, i],
-					   [null, 'lookingGlass', 'handcuffs', 'beer', 'cigarettePack', 'handSaw'],
-					   [null, 'lookingGlass', 'handcuffs', 'beer', 'cigarettePack', 'handSaw']);
-	for (let c = 0; c < defaultGame.health.length; c++)
-		addControl('health', c, ['health', c], [4, 3, 2, 1], ['4', '3', '2', '1']);
-	for (let c = 0; c < defaultGame.handcuffs.length; c++)
-		addControl('handcuffs', c, ['handcuffs', c],
-				   [null, 'willSkip', 'willBreak'],
-				   [null, 'willSkip', 'willBreak']);
-	addControl('barrel', null, ['shotgunSawedOff'], [false, true], [null, 'cutoff']);
-
-	// TODO load game from URL
-	validate();
-});
-
-// function save() {
-// 	let result = '';
-
-// 	for (let dieIndex = 0; dieIndex < numDice; dieIndex++)
-// 		result += getDieValue(dieIndex).toString();
-
-// 	result += '/' + document.getElementById('opponent').value;
-// 	return result;
-// }
-
-// function load(state) {
-// 	if (state.length < numDice) throw 'State too short';
-// 	for (let dieIndex = 0; dieIndex < numDice; dieIndex++)
-// 		setDieValue(dieIndex, parseInt(state[dieIndex]));
-// 	if (state[numDice] != '/') throw 'Expected /';
-// 	document.getElementById('opponent').value = state.substr(numDice + 1);
-// 	validate();
-// }
 
 const winPercentFormatter = new Intl.NumberFormat('en-US', {
   minimumFractionDigits: 2,
@@ -206,9 +100,9 @@ function addAnalysis(problem, data) {
 		const link = node('A', {href: '#' + o.packedGame + '/' + problem.opponent}, 'Game #' + o.packedGame);
 		link.addEventListener('click', function(e) {
 			e.preventDefault();
-			// TODO: use history.pushState instead
+
 			currentGame = copyGame(o.game);
-			validate(true);
+			handleGameEdit(true);
 		});
 		return link;
 	}
@@ -271,23 +165,7 @@ function addAnalysis(problem, data) {
 						game: data.game,
 						decisions: option.decisions,
 					};
-					fetch('websolver.php', {
-						method: 'POST',
-						headers: {
-							'Content-Type': 'application/json',
-						},
-						body: JSON.stringify(problem),
-					})
-					.then((response) => response.json())
-					.then((data) => {
-						addAnalysis(
-							problem,
-							data,
-						);
-					})
-					.catch((error) => {
-						console.log(error);
-					});
+					queryProblem(problem);
 				});
 				addEvent('➡️', label, option.outcome);
 			}
@@ -335,25 +213,22 @@ function addAnalysis(problem, data) {
 	));
 }
 
-let boardVersion = 0;
+let stateVersion = 0;
 
-function validate(now) {
+function queryProblem(problem, delay, noSave) {
+	let requestVersion = ++stateVersion;
+
+	if (delay === undefined)
+		delay = 0;
+	
+	currentGame = 'game' in problem ? copyGame(problem.game) : problem.packedGame;
 	showGame(currentGame);
 
-	boardVersion++;
+	document.getElementById('opponent').value = 'opponent' in problem ? problem.opponent : 'game';
 
-	// for (const id of ['status-badinput', 'status-loading', 'status-nodie', 'status-error', 'result-0', 'result-1', 'result-2', 'opp-move-0', 'opp-move-1', 'opp-move-2'])
-	// 	document.getElementById(id).style.display = 'none';
-
-	// if (haveFatalErrors) {
-	// 	document.getElementById('status-badinput').style.display = 'flex';
-	// 	return;
-	// }
-
-	const requestVersion = boardVersion;
 	setTimeout(function() {
-		if (requestVersion != boardVersion)
-			return;
+		if (requestVersion != stateVersion)
+			return; // outdated
 
 		// const state = save();
 		// const hash = '#' + state;
@@ -361,11 +236,6 @@ function validate(now) {
 		// 	window.location = hash;  // Push state
 
 		// document.getElementById('status-loading').style.display = 'flex';
-
-		const problem = {
-			opponent: document.getElementById('opponent').value,
-			game: currentGame,
-		};
 
 		fetch('websolver.php', {
 			method: 'POST',
@@ -376,57 +246,198 @@ function validate(now) {
 		})
 		.then((response) => response.json())
 		.then((data) => {
-			if (requestVersion != boardVersion)
+			if (requestVersion != stateVersion)
 				return; // outdated
-
+			currentGame = copyGame(data.game);
+			showGame(currentGame);
 			addAnalysis(problem, data);
+
+			problem.game = data.game;
+			problem.packedGame = data.packedGame;
+			if (noSave)
+				window.history.replaceState(problem, '', '#' + serialize(problem));
+			else
+				window.history.pushState(problem, '', '#' + serialize(problem));
 			// document.getElementById('status-loading').style.display = 'none';
 		})
 		.catch((error) => {
-			if (requestVersion != boardVersion)
+			if (requestVersion != stateVersion)
 				return; // outdated
-			console.error(error);
+			console.log(error);
 			// document.getElementById('status-loading').style.display = 'none';
 			// document.getElementById('status-error').style.display = 'flex';
 			// document.getElementById('status-error').textContent = 'Error' + error;
 		});
-	}, now ? 0 : 500);
+	}, delay);
 }
 
-(function() {
+function serialize(problem) {
+	let result = problem.packedGame + '/' + problem.opponent;
+	if ('decisions' in problem)
+		result += '/' + problem.decisions.map(n => n.toString()).join(',');
+	return result;
+}
+
+function deserialize(hash) {
+	let parts = hash.split('/');
+	let result = {};
+	if (parts.length > 0)
+		result.packedGame = parts[0];
+	if (parts.length > 1)
+		result.opponent = parts[1];
+	else
+		result.opponent = 'game';
+	if (parts.length > 2)
+		result.decisions = parts[2].split(',').map(parseInt);
+	return result;
+}
+
+window.addEventListener('popstate', function(e) {
+	let problem;
+	if (e.state !== null)
+		problem = e.state;
+	else if (window.location.hash.length > 1)
+		problem = deserialize(window.location.hash.substr(1));
+	else
+		return;
+	loadProblem(problem);
+});
+
+// Replaces the current history state. Use after navigation.
+function loadProblem(problem) {
+	queryProblem(problem, 0, true);
+}
+
+// Use this for interactive edits. It creates a new problem, with no decisions.
+function handleGameEdit(now) {
+	// for (const id of ['status-badinput', 'status-loading', 'status-nodie', 'status-error', 'result-0', 'result-1', 'result-2', 'opp-move-0', 'opp-move-1', 'opp-move-2'])
+	// 	document.getElementById(id).style.display = 'none';
+
+	const problem = {
+		opponent: document.getElementById('opponent').value,
+		[typeof currentGame === 'string' ? 'packedGame' : 'game']: currentGame
+	};
+	queryProblem(problem, now ? 0 : 500);
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+	function addControl(type, slot, path, values, valueIDs) {
+		let slotID = 'slot-' + type + (slot !== null ? '-' + slot : '');
+		let slotNode = document.getElementById(slotID);
+		slotNode.style.cursor = 'pointer';
+
+		function getValue(game) {
+			let v = game;
+			for (let step of path)
+				v = v[step];
+			return v;
+		}
+		function setValue(game, value) {
+			let v = game;
+			for (let step of path.slice(0, -1))
+				v = v[step];
+			v[path[path.length-1]] = value;
+		}
+
+		function cycleValue(game, indexUpdateFun) {
+			let oldValue = getValue(game);
+			let oldValueIndex = values.indexOf(oldValue);
+			let newValueIndex = indexUpdateFun(oldValueIndex);
+			newValueIndex = (newValueIndex + values.length) % values.length;
+			let newValue = values[newValueIndex];
+			setValue(game, newValue);
+
+			handleGameEdit();
+		}
+
+		slotNode.addEventListener('mousedown', function(event) {
+			if (event.button == 0) {
+				cycleValue(currentGame, index => index + 1);
+				event.preventDefault();
+			}
+		});
+		slotNode.addEventListener('wheel', function(event) {
+			cycleValue(currentGame, index => index + Math.sign(event.deltaX + event.deltaY));
+			event.preventDefault();
+		});
+		slotNode.addEventListener('contextmenu', function(event) {
+			cycleValue(currentGame, index => 0);
+			event.preventDefault();
+		});
+
+		showGameFuncs.push((game) => {
+			let value = getValue(game);
+			let valueIndex = values.indexOf(value);
+			if (typeof valueIDs === 'function')
+				valueIDs(value);
+			else {
+				let valueID = valueIDs[valueIndex];
+				if (valueID !== null) {
+					valueID = type + '-' + valueID;
+
+					let valueNode = document.createElementNS("http://www.w3.org/2000/svg", 'use');
+					valueNode.setAttribute('class', 'value');
+					valueNode.setAttributeNS("http://www.w3.org/1999/xlink", 'href', '#' + valueID);
+					slotNode.appendChild(valueNode);
+				}
+			}
+		});
+
+		resetGameFuncs.push((game) => {
+			cycleValue(game, index => 0);
+		});
+	}
+	addControl('handle', null, ['currentTurn'], ['player', 'dealer'], (currentTurn) => {
+		let e = document.getElementById('board');
+		e.classList.toggle('dealer-turn', currentTurn === 'dealer');
+	});
+	for (let i = 0; i < defaultGame.shells.length; i++)
+		addControl('shell', i, ['shells', i], [null, 'blank', 'live'], [null, 'blank', 'live']);
+	addControl('shell', 'next', ['nextShell'], [null, 'blank', 'live'], ['unknown', 'blank', 'live']);
+	for (let c = 0; c < defaultGame.items.length; c++)
+		for (let i = 0; i < defaultGame.items[c].length; i++)
+			addControl('item', c + '-' + i, ['items', c, i],
+					   [null, 'lookingGlass', 'handcuffs', 'beer', 'cigarettePack', 'handSaw'],
+					   [null, 'lookingGlass', 'handcuffs', 'beer', 'cigarettePack', 'handSaw']);
+	for (let c = 0; c < defaultGame.health.length; c++)
+		addControl('health', c, ['health', c], [4, 3, 2, 1], ['4', '3', '2', '1']);
+	for (let c = 0; c < defaultGame.handcuffs.length; c++)
+		addControl('handcuffs', c, ['handcuffs', c],
+				   [null, 'willSkip', 'willBreak'],
+				   [null, 'willSkip', 'willBreak']);
+	addControl('barrel', null, ['shotgunSawedOff'], [false, true], [null, 'cutoff']);
+
 	document.getElementById('button-flip').addEventListener('click', function(e) {
 		e.preventDefault();
 		flipBoard();
-		validate(true);
+		handleGameEdit(true);
 	});
 
 	document.getElementById('button-reset').addEventListener('click', function(e) {
 		e.preventDefault();
 		resetBoard();
-		validate(true);
+		handleGameEdit(true);
 	});
 
 	document.getElementById('opponent').addEventListener('change', function(e) {
 		e.preventDefault();
-		validate(true);
+		handleGameEdit(true);
 	});
 
-// 	validate(true);
-// 	if (window.location.hash.length > 1) {
-// 		try {
-// 			load(window.location.hash.substr(1));
-// 		} catch (e) {
-// 			console.log(e);
-// 		}
-// 	}
-
-// 	window.addEventListener('hashchange', function() {
-// 		if (window.location.hash.length > 1) {
-// 			const state = window.location.hash.substr(1);
-// 			if (state != save())
-// 				load(state);
-// 		}
-// 	});
+	let problem = null;
+	if (window.location.hash.length > 1) {
+		try {
+			problem = deserialize(window.location.hash.substr(1));
+		} catch (e) {
+			console.log(e);
+		}
+	}
+	if (!problem)
+		problem = {
+			game: defaultGame,
+			opponent: 'game',
+		};
+	loadProblem(problem);
 
 	const page = document.getElementById('page');
 	const pageStyle = window.getComputedStyle(page);
@@ -462,4 +473,4 @@ function validate(now) {
 		document.body.classList.toggle('help-visible', helpVisible);
 		document.querySelector('#button-help text').textContent = helpVisible ? '❌' : 'ℹ️';
 	});
-})();
+});
