@@ -27,46 +27,11 @@
 
 <!--
 <div id="game">
-	<select id="opponent">
-		<option value="game">Game dealer AI</option>
-		<option value="perfect">Perfect opponent</option>
-	</select>
-	<div class="opp-move" id="opp-move-0"></div>
-	<div class="opp-move" id="opp-move-1"></div>
-	<div class="opp-move" id="opp-move-2"></div>
-	<div class="board" id="board-other">
-		<div class="die" id="die-0"></div>
-		<div class="die" id="die-1"></div>
-		<div class="die" id="die-2"></div>
-		<div class="die" id="die-3"></div>
-		<div class="die" id="die-4"></div>
-		<div class="die" id="die-5"></div>
-		<div class="die" id="die-6"></div>
-		<div class="die" id="die-7"></div>
-		<div class="die" id="die-8"></div>
-	</div>
-	<div class="board" id="board-current">
-		<div class="die" id="die-9"></div>
-		<div class="die" id="die-10"></div>
-		<div class="die" id="die-11"></div>
-		<div class="die" id="die-12"></div>
-		<div class="die" id="die-13"></div>
-		<div class="die" id="die-14"></div>
-		<div class="die" id="die-15"></div>
-		<div class="die" id="die-16"></div>
-		<div class="die" id="die-17"></div>
-	</div>
-	<div id="tray">
-		<div class="die" id="die-18"></div>
-	</div>
 	<div id="flip" title="Click here to flip the board">⇕</div>
 	<div id="reset" title="Click here to reset the board">↻</div>
 	<div id="status-badinput">Please fix&nbsp;<span class="error">errors</span></div>
 	<div id="status-loading">Loading...</div>
 	<div id="status-error">Error</div>
-	<div class="result" id="result-0"></div>
-	<div class="result" id="result-1"></div>
-	<div class="result" id="result-2"></div>
 	<div id="help"><div>?</div></div>
 	<div id="help-page">
 		<div>
