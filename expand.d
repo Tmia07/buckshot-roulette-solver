@@ -593,6 +593,9 @@ unittest
 
 template itemCardinality(T)
 {
+	static if (is(T == Nullable!U, U))
+		enum size_t itemCardinality = 1 + itemCardinality!U;
+	else
 	static if (is(T == bool))
 		enum size_t itemCardinality = 2;
 	else
@@ -603,6 +606,25 @@ template itemCardinality(T)
 		enum size_t itemCardinality = 256;
 	else
 		enum size_t itemCardinality = 0;
+}
+
+size_t toCardinal(T)(T value)
+if (itemCardinality!T != 0)
+{
+	static if (is(T == Nullable!U, U))
+		return value.isNull ? 0 : 1 + value.get().toCardinal();
+	else
+		return value;
+}
+
+T fromCardinal(T)(size_t cardinal)
+if (itemCardinality!T != 0)
+{
+	assert(cardinal < itemCardinality!T);
+	static if (is(T == Nullable!U, U))
+		return cardinal == 0 ? T.init : (cardinal - 1).fromCardinal!U().nullable;
+	else
+		return cast(T)cardinal;
 }
 
 /// Standard `Driver.choice` implementation.
@@ -634,14 +656,14 @@ Score graphChoice(T)(
 			static if (card)
 			{
 				size_t[card] counts;
-				foreach (item; items)
-					counts[item]++;
+				foreach (T item; items)
+					counts[item.toCardinal()]++;
 
 				Score sum = 0;
 				size_t total = 0;
 				foreach (index; 0 .. card)
 				{
-					auto item = cast(T)index;
+					auto item = index.fromCardinal!T;
 					auto count = counts[index];
 					if (!count)
 						continue;
