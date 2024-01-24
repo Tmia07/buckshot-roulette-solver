@@ -302,121 +302,134 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 				handcuffState = HandcuffState.none;
 			}
 
-		// Refill magazine.
-		return driver.choice!ubyte(
-			ChoiceMode.random,
-			() => "How many shells are loaded?",
-			(totalShells) {
-				State state2 = state1;
-				auto liveShells = cast(ubyte)(totalShells / 2); // rounding down
-				auto blankShells = cast(ubyte)(totalShells - liveShells);
-				driver.log(() => blankShells.to!string ~ " blank, " ~ liveShells.to!string ~ " live.");
-				state2.shells[ShellType.blank] = blankShells;
-				state2.shells[ShellType.live] = liveShells;
+		// Use a different flow depending on if the driver is interactive.
+		// If yes, use a series of questions suitable for interactive use (humans).
+		// If no, use a more efficient flow with fewer questions.
+		if (/*driver.interactive*/false)
+		{
+			// Ask questions in the order that the game presents information to players.
+			enum Phase
+			{
+				playerItems,
+				
+			}
+		}
+		else
+			// Refill magazine.
+			return driver.choice!ubyte(
+				ChoiceMode.random,
+				() => "How many shells are loaded?",
+				(totalShells) {
+					State state2 = state1;
+					auto liveShells = cast(ubyte)(totalShells / 2); // rounding down
+					auto blankShells = cast(ubyte)(totalShells - liveShells);
+					driver.log(() => blankShells.to!string ~ " blank, " ~ liveShells.to!string ~ " live.");
+					state2.shells[ShellType.blank] = blankShells;
+					state2.shells[ShellType.live] = liveShells;
 
-				// Grant items
-				return driver.choice!ubyte(
-					ChoiceMode.random,
-					() => "How many items are granted?",
-					(numItems) {
-						Score grantItems(ref const State state3, Character character)
-						{
-							if (character == enumLength!Character)
+					// Grant items
+					return driver.choice!ubyte(
+						ChoiceMode.random,
+						() => "How many items are granted?",
+						(numItems) {
+							Score grantItems(ref const State state3, Character character)
 							{
-								// Done granting items.
+								if (character == enumLength!Character)
+								{
+									// Done granting items.
 
-								// It's always the player's turn first.
-								State state4 = state3;
-								state4.currentTurn = Character.player;
+									// It's always the player's turn first.
+									State state4 = state3;
+									state4.currentTurn = Character.player;
 
-								driver.log(() => "Round begins.");
-								return driver.recurse(state4);
-							}
+									driver.log(() => "Round begins.");
+									return driver.recurse(state4);
+								}
 
-							auto remainingRoom = maxItems - state3.totalItems(character);
-							if (remainingRoom < numItems)
-								driver.log(() => (character == Character.player ? "You don't" : "The dealer doesn't") ~ " have room to receive " ~ numItems.to!string ~ " item" ~ (numItems == 1 ? "" : "s") ~ ".");
+								auto remainingRoom = maxItems - state3.totalItems(character);
+								if (remainingRoom < numItems)
+									driver.log(() => (character == Character.player ? "You don't" : "The dealer doesn't") ~ " have room to receive " ~ numItems.to!string ~ " item" ~ (numItems == 1 ? "" : "s") ~ ".");
 
-							auto grantedItems = min(numItems, remainingRoom);
-							if (grantedItems == 0)
-							{
-								driver.log(() => (character == Character.player ? "You don't" : "The dealer doesn't") ~ " receive any items.");
-								character++;
-								return grantItems(state3, character);
-							}
+								auto grantedItems = min(numItems, remainingRoom);
+								if (grantedItems == 0)
+								{
+									driver.log(() => (character == Character.player ? "You don't" : "The dealer doesn't") ~ " receive any items.");
+									character++;
+									return grantItems(state3, character);
+								}
 
-							driver.log(() => (character == Character.player ? "You receive" : "The dealer receives") ~ " " ~ grantedItems.to!string ~ " item" ~ (grantedItems == 1 ? "" : "s") ~ ".");
+								driver.log(() => (character == Character.player ? "You receive" : "The dealer receives") ~ " " ~ grantedItems.to!string ~ " item" ~ (grantedItems == 1 ? "" : "s") ~ ".");
 
-							static foreach (grantedItemsCT; 1 .. 4 + 1)
-								if (grantedItemsCT == grantedItems)
-									static foreach (numCigarettePacksCT; 0 .. 2 + 1)
-										if (numCigarettePacksCT == state3.items[character][Item.cigarettePack])
-										{
-											alias PackedItems = ubyte;
-											alias ItemCNS = CNS!(/*PackedItems*/uint, /*Item*/ubyte, grantedItemsCT, enumLength!Item, true, true);
-											static assert(ItemCNS.packedCard <= PackedItems.max);
-
-											PackedItems[] genItemChoiceTable()
+								static foreach (grantedItemsCT; 1 .. 4 + 1)
+									if (grantedItemsCT == grantedItems)
+										static foreach (numCigarettePacksCT; 0 .. 2 + 1)
+											if (numCigarettePacksCT == state3.items[character][Item.cigarettePack])
 											{
-												PackedItems[] result;
+												alias PackedItems = ubyte;
+												alias ItemCNS = CNS!(/*PackedItems*/uint, /*Item*/ubyte, grantedItemsCT, enumLength!Item, true, true);
+												static assert(ItemCNS.packedCard <= PackedItems.max);
 
-												/*Item*/ubyte[grantedItemsCT] items;
-												void iterate(size_t itemIndex, int remainingCigarettePacks)
+												PackedItems[] genItemChoiceTable()
 												{
-													if (itemIndex == grantedItemsCT)
+													PackedItems[] result;
+
+													/*Item*/ubyte[grantedItemsCT] items;
+													void iterate(size_t itemIndex, int remainingCigarettePacks)
 													{
-														// `dup` for https://issues.dlang.org/show_bug.cgi?id=24354
-														/*Item*/ubyte[grantedItemsCT] sortedItems = items.dup;
-														sortedItems[].sort();
-														result ~= cast(PackedItems)ItemCNS.pack(sortedItems);
-													}
-													else
-														foreach (item; Item.init .. enumLength!Item)
+														if (itemIndex == grantedItemsCT)
 														{
-															if (item == Item.cigarettePack && !remainingCigarettePacks)
-																continue;
-															items[itemIndex] = item;
-															iterate(itemIndex + 1, remainingCigarettePacks - (item == Item.cigarettePack ? 1 : 0));
+															// `dup` for https://issues.dlang.org/show_bug.cgi?id=24354
+															/*Item*/ubyte[grantedItemsCT] sortedItems = items.dup;
+															sortedItems[].sort();
+															result ~= cast(PackedItems)ItemCNS.pack(sortedItems);
 														}
+														else
+															foreach (item; Item.init .. enumLength!Item)
+															{
+																if (item == Item.cigarettePack && !remainingCigarettePacks)
+																	continue;
+																items[itemIndex] = item;
+																iterate(itemIndex + 1, remainingCigarettePacks - (item == Item.cigarettePack ? 1 : 0));
+															}
+													}
+													iterate(0, 2 - numCigarettePacksCT);
+													return result;
 												}
-												iterate(0, 2 - numCigarettePacksCT);
-												return result;
+
+												static immutable choiceTable = genItemChoiceTable();
+
+												return driver.choice!PackedItems(
+													ChoiceMode.randomWithDuplicates,
+													() => "What items did " ~ (character == Character.player ? "you" : "the dealer") ~ " get?",
+													(packedItems) {
+														auto items = ItemCNS.unpack(packedItems);
+														State state4 = state3;
+														foreach (item; items)
+															state4.items[character][item]++;
+														assert(state4.totalItems(character) <= maxItems);
+														auto nextCharacter = character; nextCharacter++;
+														return grantItems(state4, nextCharacter);
+													},
+													(packedItems) {
+														auto items = ItemCNS.unpack(packedItems);
+														return items[].map!(item => itemDescriptions[item]).join(", ").capitalize;
+													},
+													choiceTable,
+												);
 											}
 
-											static immutable choiceTable = genItemChoiceTable();
-
-											return driver.choice!PackedItems(
-												ChoiceMode.randomWithDuplicates,
-												() => "What items did " ~ (character == Character.player ? "you" : "the dealer") ~ " get?",
-												(packedItems) {
-													auto items = ItemCNS.unpack(packedItems);
-													State state4 = state3;
-													foreach (item; items)
-														state4.items[character][item]++;
-													assert(state4.totalItems(character) <= maxItems);
-													auto nextCharacter = character; nextCharacter++;
-													return grantItems(state4, nextCharacter);
-												},
-												(packedItems) {
-													auto items = ItemCNS.unpack(packedItems);
-													return items[].map!(item => itemDescriptions[item]).join(", ").capitalize;
-												},
-												choiceTable,
-											);
-										}
-
-							driver.log(() => "Impossible combination of granted items / cigarette packs.");
-							return Score.nan;
-						}
-						return grantItems(state2, Character.init);
-					},
-					numItems => numItems.to!string,
-					0, 1, 2, 3, 4
-				);
-			},
-			totalShells => totalShells.to!string,
-			2, 3, 4, 5, 6, 7, 8
-		);
+								driver.log(() => "Impossible combination of granted items / cigarette packs.");
+								return Score.nan;
+							}
+							return grantItems(state2, Character.init);
+						},
+						numItems => numItems.to!string,
+						0, 1, 2, 3, 4
+					);
+				},
+				totalShells => totalShells.to!string,
+				2, 3, 4, 5, 6, 7, 8
+			);
 	}
 
 	assert(!state0.handcuffs[state0.currentTurn]);
@@ -547,6 +560,8 @@ unittest
 {
 	static struct TestDriver
 	{
+		@property bool interactive() nothrow @nogc { assert(false); }
+
 		/// Make a note.
 		void log(scope string delegate() message) nothrow @nogc {}
 
@@ -675,6 +690,7 @@ unittest
 {
 	struct Driver
 	{
+		enum interactive = false;
 		void log(scope string delegate() message) nothrow @nogc {}
 		Score recurse(const ref Game game) nothrow @nogc { return 0; }
 		alias choice = graphChoice;

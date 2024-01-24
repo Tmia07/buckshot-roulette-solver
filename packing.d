@@ -158,6 +158,7 @@ void main()
 
 		struct Driver
 		{
+			enum interactive = false;
 			void log(scope string delegate() message) nothrow @nogc {}
 
 			Score recurse(const ref Game game) nothrow @nogc
