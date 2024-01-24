@@ -19,6 +19,10 @@
 			</tr>
 		</table>
 	</div>
+	<select id="opponent">
+		<option value="game">Game dealer AI</option>
+		<option value="perfect">Perfect opponent</option>
+	</select>
 </div>
 
 <!--

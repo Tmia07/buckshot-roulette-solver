@@ -216,6 +216,7 @@ function node(tagName, attributes, children) {
 }
 
 function addAnalysis(problem, data, rowAfter) {
+	const origProblem = problem;
 	while (rowAfter.nextSibling)
 		rowAfter.nextSibling.remove();
 
@@ -298,7 +299,7 @@ function addAnalysis(problem, data, rowAfter) {
 				]);
 				radio.addEventListener('change', function() {
 					const problem = {
-						// opponent: document.getElementById('opponent').value,
+						opponent: origProblem.opponent,
 						game: data.game,
 						decisions: option.decisions,
 					};
@@ -438,7 +439,7 @@ function validate(now) {
 		// document.getElementById('status-loading').style.display = 'flex';
 
 		const problem = {
-			// opponent: document.getElementById('opponent').value,
+			opponent: document.getElementById('opponent').value,
 			game: currentGame,
 		};
 
@@ -581,9 +582,9 @@ function validate(now) {
 // 		validate(true);
 // 	});
 
-// 	document.getElementById('opponent').addEventListener('change', function() {
-// 		validate(true);
-// 	});
+	document.getElementById('opponent').addEventListener('change', function() {
+		validate(true);
+	});
 
 // 	validate(true);
 // 	if (window.location.hash.length > 1) {
