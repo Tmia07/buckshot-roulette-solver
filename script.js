@@ -183,10 +183,11 @@ function node(tagName, attributes, children) {
 	return e;
 }
 
-function addAnalysis(problem, data, rowAfter) {
+function addAnalysis(problem, data) {
 	const origProblem = problem;
-	while (rowAfter.nextSibling)
-		rowAfter.nextSibling.remove();
+	const explorerHeader = document.getElementById('explorer-header');
+	while (explorerHeader.nextSibling)
+		explorerHeader.nextSibling.remove();
 
 	function addEvent(icon, text, winPercent) {
 		const tr = node('TR', {}, [
@@ -197,7 +198,7 @@ function addAnalysis(problem, data, rowAfter) {
 				 : winPercentFormatter.format(winPercent)
 			)
 		]);
-		rowAfter.parentElement.appendChild(tr);
+		explorerHeader.parentElement.appendChild(tr);
 		return tr;
 	}
 
@@ -244,10 +245,7 @@ function addAnalysis(problem, data, rowAfter) {
 				'';
 			addEvent(icon,
 					 event.choice.description,
-					 'selectedOption' in event.choice
-					 ? event.choice.options[event.choice.selectedOption].outcome
-					 : undefined);
-			let lastRow;
+					 event.choice.score);
 			for (let i = 0; i < event.choice.options.length; i++) {
 				let option = event.choice.options[i];
 				let description = option.description;
@@ -259,7 +257,7 @@ function addAnalysis(problem, data, rowAfter) {
 					id: 'choice-' + choiceCounter + '-' + i,
 					value: i
 				});
-				if ('selectedOption' in event.choice && i == event.choice.selectedOption)
+				if ('selectedOptionIndex' in event.choice && i == event.choice.selectedOptionIndex)
 					radio.checked = 'checked';
 				let label = node('LABEL', { for: radio.id }, [
 					radio,
@@ -283,14 +281,13 @@ function addAnalysis(problem, data, rowAfter) {
 						addAnalysis(
 							problem,
 							data,
-							lastRow,
 						);
 					})
 					.catch((error) => {
 						console.log(error);
 					});
 				});
-				lastRow = addEvent('➡️', label, option.outcome);
+				addEvent('➡️', label, option.outcome);
 			}
 		}
 		else
@@ -348,11 +345,7 @@ function validate(now) {
 			if (requestVersion != boardVersion)
 				return; // outdated
 
-			addAnalysis(
-				problem,
-				data,
-				document.getElementById('explorer-header'),
-			);
+			addAnalysis(problem, data);
 			// document.getElementById('status-loading').style.display = 'none';
 		})
 		.catch((error) => {

@@ -1,6 +1,7 @@
 import std.algorithm.comparison;
 import std.algorithm.iteration;
 import std.algorithm.mutation;
+import std.algorithm.searching;
 import std.conv;
 import std.exception;
 import std.file;
@@ -148,6 +149,12 @@ struct JSGame
 	}
 }
 
+/// Index into the `items` array passed to some `Driver.choice` call
+alias ItemIndex = size_t;
+
+/// Index into some `JSAnalysis.Event.Choice.options` array.
+alias OptionIndex = size_t;
+
 struct JSProblem
 {
 	Opponent opponent;
@@ -156,7 +163,7 @@ struct JSProblem
 	// -- or --
 	string packedGame;
 
-	size_t[] decisions;
+	ItemIndex[] decisions;
 }
 
 struct JSAnalysis
@@ -184,13 +191,20 @@ struct JSAnalysis
 			ChoiceMode mode;
 			struct Option
 			{
-				size_t[] decisions; // all decisions up to this point including this one, starting with `game`. Put this in `JSProblem.decisions`.
+				/// All decisions up to this point including this one, starting with `game`.
+				/// Put this in `JSProblem.decisions`.
+				ItemIndex[] decisions;
+
 				string description;
 				Score outcome;
-				@JSONOptional Nullable!double probability; // Only when non-uniform random
+
+				/// Present only for non-uniform random choice events.
+				@JSONOptional Nullable!double probability;
 			}
 			Option[] options;
-			@JSONOptional Nullable!size_t selectedOption; // This one is an index into `options`.
+			Score score; // According to the algorithm - NOT according to `selectedOptionIndex`.
+			// If analysis continues, this shows across which branch it does so.
+			@JSONOptional Nullable!OptionIndex selectedOptionIndex; // This one is an index into `options`.
 		}
 		@JSONOptional Choice choice;
 
@@ -217,13 +231,11 @@ void main(string[] args)
 		bool interactive = true;
 
 		JSGame[] recursedGames;
-		size_t[] decisions; // Decisions made since the very start; index into items
+		ItemIndex[] decisions; // Decisions made since the very start; index into items
 
 		void log(scope string delegate() message)
 		{
 			if (!interactive)
-				return;
-			if (decisions.length < problem.decisions.length)
 				return;
 
 			JSAnalysis.Event event;
@@ -234,8 +246,6 @@ void main(string[] args)
 		Score run(const ref Game game)
 		{
 			assert(interactive);
-			if (decisions.length < problem.decisions.length)
-				return expand.expand(game, &this, problem.opponent);
 
 			JSAnalysis.Event event;
 			size_t eventIndex = analysis.events.length;
@@ -251,8 +261,6 @@ void main(string[] args)
 		{
 			if (!interactive)
 				return scores[game.packGame()].unpackScore;
-			if (decisions.length < problem.decisions.length)
-				return expand.expand(game, &this, problem.opponent);
 
 			auto jsGame = JSGame(game, recursedGames[$-1]);
 			recursedGames ~= jsGame;
@@ -285,17 +293,6 @@ void main(string[] args)
 					items,
 				);
 
-			// The caller is not interested in events that happened
-			// along the choices specified by it.
-			if (decisions.length < problem.decisions.length)
-			{
-				auto choiceIndex = problem.decisions[decisions.length];
-				enforce(choiceIndex < items.length, "Invalid choice index");
-
-				decisions ~= choiceIndex; scope(exit) decisions = decisions[0 .. $-1];
-				return getScore(items[choiceIndex]);
-			}
-
 			// First, record the event.
 			JSAnalysis.Event event;
 			event.choice.description = description();
@@ -305,7 +302,7 @@ void main(string[] args)
 			{
 				T item;
 				size_t count;
-				size_t index;
+				ItemIndex itemIndex;
 				Score score;
 			}
 			Option[] options;
@@ -323,21 +320,21 @@ void main(string[] args)
 				static if (card)
 				{
 					size_t[card] counts;
-					size_t[card] indices;
-					foreach_reverse (i, item; items)
+					ItemIndex[card] itemIndices;
+					foreach_reverse (ItemIndex itemIndex, item; items)
 					{
 						counts[item]++;
-						indices[item] = i;
+						itemIndices[item] = itemIndex;
 					}
 
-					foreach (index; 0 .. card)
+					foreach (numericItem; 0 .. card)
 					{
-						auto item = cast(T)index;
-						auto count = counts[index];
+						auto item = cast(T)numericItem;
+						auto count = counts[numericItem];
 						if (!count)
 							continue;
 
-						options ~= Option(item, counts[index], indices[index]);
+						options ~= Option(item, counts[numericItem], itemIndices[numericItem]);
 					}
 				}
 				else
@@ -360,7 +357,7 @@ void main(string[] args)
 			{
 				assert(option.count);
 				auto jsOption = JSAnalysis.Event.Choice.Option(
-					decisions ~ option.index,
+					decisions ~ option.itemIndex,
 					getDescription(option.item),
 					option.score,
 				);
@@ -369,7 +366,7 @@ void main(string[] args)
 				event.choice.options ~= jsOption;
 			}
 
-			Nullable!size_t selectedOption;
+			Nullable!OptionIndex selectedOptionIndex;
 			Score score = {
 				final switch (mode)
 				{
@@ -387,11 +384,11 @@ void main(string[] args)
 
 					case ChoiceMode.best:
 						Score bestScore = -Score.max;
-						foreach (optionIndex, ref option; options)
+						foreach (OptionIndex optionIndex, ref option; options)
 							if (option.score > bestScore) // Comparison with NaN will yield false
 							{
 								bestScore = option.score;
-								selectedOption = optionIndex;
+								selectedOptionIndex = optionIndex;
 							}
 						assert(bestScore != -Score.max, "All choices are invalid");
 						return bestScore;
@@ -399,32 +396,45 @@ void main(string[] args)
 					case ChoiceMode.worst:
 					case ChoiceMode.unknown:
 						Score worstScore = Score.max;
-						foreach (optionIndex, ref option; options)
+						foreach (OptionIndex optionIndex, ref option; options)
 							if (option.score < worstScore) // Comparison with NaN will yield false
 							{
 								worstScore = option.score;
-								selectedOption = optionIndex;
+								selectedOptionIndex = optionIndex;
 							}
 						assert(worstScore != Score.max, "All choices are invalid");
 						return worstScore;
 				}
 			}();
+			event.choice.score = score;
 
-			if (selectedOption.isNull && options.length == 1)
-				selectedOption = 0;
+			if (selectedOptionIndex.isNull && options.length == 1)
+				selectedOptionIndex = 0;
 
-			event.choice.selectedOption = selectedOption;
+			if (decisions.length < problem.decisions.length)
+			{
+				// User's decision overrides what the algorithm would choose.
+				auto itemIndex = problem.decisions[decisions.length];
+				enforce(itemIndex < items.length, "Invalid choice index");
+				auto optionIndex = options.countUntil!((ref option) => option.itemIndex == itemIndex);
+				enforce(optionIndex >= 0, "Item is not an option");
+				selectedOptionIndex = optionIndex;
+			}
+
+			event.choice.selectedOptionIndex = selectedOptionIndex;
 			analysis.events ~= event;
 
 			// Move forward when the graph expansion algorithm does so:
-			if (!selectedOption.isNull)
+			if (!selectedOptionIndex.isNull)
 			{
-				auto choiceIndex = options[selectedOption.get()].index;
-				decisions ~= choiceIndex; scope(exit) decisions = decisions[0 .. $-1];
-				return getScore(items[choiceIndex]);
+				auto itemIndex = options[selectedOptionIndex.get()].itemIndex;
+				decisions ~= itemIndex; scope(exit) decisions = decisions[0 .. $-1];
+				auto userChoiceScore = getScore(items[itemIndex]);
+				// Discard user choice score (do not let scores bubble up).
+				cast(void) userChoiceScore;
 			}
-			else
-				return score;
+
+			return score;
 		}
 
 		Score gameOver(bool playerWon)
