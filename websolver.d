@@ -448,7 +448,22 @@ void main(string[] args)
 	if (problem.packedGame)
 		game = problem.packedGame.to!PackedGame.unpackGame();
 	else
-		game = problem.game.toGame();
+		try
+			game = problem.game.toGame();
+		catch (JSGameError e)
+		{
+			struct ValidationFailureResponse
+			{
+				struct Error
+				{
+					string message;
+					string[] ids;
+				}
+				Error validationError;
+			}
+			stdout.writeln(ValidationFailureResponse(ValidationFailureResponse.Error(e.msg, e.badIDs)).toJson);
+			return;
+		}
 	analysis.game = jsGame;
 	analysis.packedGame = game.packGame().to!string;
 

@@ -16,6 +16,7 @@ let showGameFuncs = [];
 
 function showGame(game) {
 	document.querySelectorAll('.value').forEach(e => e.remove());
+	document.querySelectorAll('.error').forEach(e => e.style.removeProperty('fill'));
 	for (let func of showGameFuncs)
 		func(game);
 }
@@ -214,6 +215,20 @@ function addAnalysis(data, rowAfter) {
 		return tr;
 	}
 
+	if ('error' in data) {
+		addEvent('💥', 'Fatal error: ' + data.error);
+		return;
+	}
+	if ('validationError' in data) {
+		addEvent('💥', 'Invalid game: ' + data.validationError.message);
+		for (let id of data.validationError.ids) {
+			let e = document.getElementById('slot-' + id);
+			e.classList.add('error');
+			e.style.fill = '#faa';
+		}
+		return;
+	}
+
 	for (let event of data.events) {
 		if ('message' in event)
 			addEvent('ℹ️', event.message);
@@ -247,7 +262,6 @@ function addAnalysis(data, rowAfter) {
 				radio.name = 'choice-' + choiceCounter;
 				radio.id = 'choice-' + choiceCounter + '-' + i;
 				radio.value = i;
-				// TODO onclick
 				if ('selectedOption' in event.choice && i == event.choice.selectedOption)
 					radio.checked = 'checked';
 				label.for = radio.id;
@@ -268,8 +282,6 @@ function addAnalysis(data, rowAfter) {
 					})
 					.then((response) => response.json())
 					.then((data) => {
-						if ('error' in data)
-							throw new Error('data error');
 						addAnalysis(
 							data,
 							lastRow,
@@ -411,8 +423,6 @@ function validate(now) {
 		.then((data) => {
 			if (requestVersion != boardVersion)
 				return; // outdated
-			if ('error' in data)
-				throw new Error('data error'); // TODO
 
 			addAnalysis(
 				data,
@@ -454,7 +464,7 @@ function validate(now) {
 		.catch((error) => {
 			if (requestVersion != boardVersion)
 				return; // outdated
-			console.log(error);
+			console.error(error);
 			// document.getElementById('status-loading').style.display = 'none';
 			// document.getElementById('status-error').style.display = 'flex';
 			// document.getElementById('status-error').textContent = 'Error' + error;
