@@ -10,6 +10,8 @@
     .demo { display: none; }
 
     #buttons > g { cursor: pointer; }
+    #loading { display: none; }
+    .loading #loading { display: inline; }
   </style>
 
   <defs>
@@ -110,6 +112,12 @@
     <g transform="translate(50, 30)" id="slot-shell-5"><use href="#bg-shell"/></g>
     <g transform="translate(52, 30)" id="slot-shell-6"><use href="#bg-shell"/></g>
     <g transform="translate(54, 30)" id="slot-shell-7"><use href="#bg-shell"/></g>
+  </g>
+
+  <g id="loading" transform="translate(8, 30)" >
+    <title>Loading... Please wait...</title>
+    <rect width="16" height="4" stroke-width="0.5" />
+    <text x="8" y="2" style="font-size: 3px; text-anchor: middle; dominant-baseline: central; fill: black; font-family: sans-serif">LOADING</text>
   </g>
 
   <g id="gun">

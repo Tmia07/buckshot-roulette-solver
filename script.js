@@ -235,7 +235,7 @@ function queryProblem(problem, delay, noSave) {
 		// if (hash != window.location.hash)
 		// 	window.location = hash;  // Push state
 
-		// document.getElementById('status-loading').style.display = 'flex';
+		document.body.classList.toggle('loading', true);
 
 		fetch('websolver.php', {
 			method: 'POST',
@@ -258,15 +258,15 @@ function queryProblem(problem, delay, noSave) {
 				window.history.replaceState(problem, '', '#' + serialize(problem));
 			else
 				window.history.pushState(problem, '', '#' + serialize(problem));
-			// document.getElementById('status-loading').style.display = 'none';
+			document.body.classList.toggle('loading', false);
 		})
 		.catch((error) => {
 			if (requestVersion != stateVersion)
 				return; // outdated
 			console.log(error);
-			// document.getElementById('status-loading').style.display = 'none';
+			document.body.classList.toggle('loading', false);
 			// document.getElementById('status-error').style.display = 'flex';
-			// document.getElementById('status-error').textContent = 'Error' + error;
+			document.getElementById('summary').textContent = 'Error: ' + error;
 		});
 	}, delay);
 }
