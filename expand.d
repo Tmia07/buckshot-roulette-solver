@@ -406,7 +406,7 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 
 						return driver.choice!(Nullable!Item)(
 							ChoiceMode.randomWithDuplicates,
-							() => "What is the " ~ ["first", "second", "third", "fourth"][state2.itemIndex[character]] ~ " item that " ~ (character == Character.player ? "you get" : "the dealer gets") ~ "?",
+							() => "What is the" ~ (maxItems == 1 ? "" : [" first", " second", " third", " fourth"][state2.itemIndex[character]]) ~ " item that " ~ (character == Character.player ? "you get" : "the dealer gets") ~ "?",
 							(item) {
 								if (item.isNull)
 									return nextPhase(state2);
