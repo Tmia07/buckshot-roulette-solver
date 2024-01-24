@@ -50,8 +50,6 @@ struct JSGame
 	{
 		this = reference;
 
-		this.currentTurn = game.currentTurn;
-
 		this.nextShell = game.nextShell;
 		if (!game.nextShell.isNull)
 			game.shells[game.nextShell.get()]++; // Encode that one, too
@@ -75,6 +73,7 @@ struct JSGame
 		foreach (character; Character.init .. enumLength!Character)
 			this.health[character] = game.health[character];
 
+		this.currentTurn = game.currentTurn;
 		foreach (character; Character.init .. enumLength!Character)
 			if (game.handcuffs[character] == HandcuffState.none)
 				this.handcuffs[character] = Nullable!HandcuffState.init;
