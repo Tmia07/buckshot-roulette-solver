@@ -42,11 +42,11 @@ body {
 	grid-row: 1;
 	grid-column: 2;
 	align-self: start;
-	padding-top: 1em;
 	overflow-y: auto;
 }
 
 #explorer > table {
+	margin: 1em 0;
 	background-color: white;
 	color: black;
 	border-collapse: collapse;
