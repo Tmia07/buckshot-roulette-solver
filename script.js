@@ -215,6 +215,7 @@ function addAnalysis(problem, data) {
 
 	if ('error' in data) {
 		addEvent('💥', 'Fatal error: ' + data.error);
+		document.getElementById('summary').replaceChildren(node('DIV', {}, [node('B', {}, 'Summary:'), ' ', 'Error, please see below.']));
 		return;
 	}
 	if ('validationError' in data) {
@@ -224,6 +225,7 @@ function addAnalysis(problem, data) {
 			e.classList.add('error');
 			e.style.fill = '#faa';
 		}
+		document.getElementById('summary').replaceChildren(node('DIV', {}, [node('B', {}, 'Summary:'), ' ', 'Error, please see below.']));
 		return;
 	}
 
@@ -299,6 +301,38 @@ function addAnalysis(problem, data) {
 			addEvent(event.gameOver ? '✌️' : '💀', 'Game over.', event.gameOver ? 1 : 0);
 		}
 	}
+
+	document.getElementById('summary').replaceChildren(node(
+		'DIV', {}, [
+			node('B', {}, 'Summary:'),
+			' ',
+		].concat((function() {
+			if (data.events.length < 2 || !('start' in data.events[0]))
+				return ['Failed to summarize results (unrecognized events).'];
+			if ('choice' in data.events[1] && data.events[1].choice.mode === 'best') {
+				let bestScore = data.events[1].choice.score;
+				let bestOptions = [];
+				for (let option of data.events[1].choice.options)
+					if (option.outcome === bestScore)
+						bestOptions.push(option);
+				if (!bestOptions.length)
+					return ['Failed to summarize results (no options).'];
+				if (bestOptions.length == data.events[1].choice.options.length)
+					return [
+						"It's your turn, however, at this point, your choice ", node('B', {}, "does not matter"), ". ",
+						"No matter what you do now, you have a ", node('B', {}, winPercentFormatter.format(bestScore)), " chance to win."
+					];
+				else {
+					const interleave = (arr, thing) => [].concat(...arr.map(n => [n, thing])).slice(0, -1);
+					return [
+						"It's your turn. For the best outcome (", node('B', {}, winPercentFormatter.format(bestScore)), "), you should ",
+					].concat(interleave(bestOptions.map(option => node('B', {}, option.description)), ' or ')).concat(["."]);
+				}
+			} else {
+				return ["It is currently not your turn, but in this situation, you have a ", node('B', {}, winPercentFormatter.format(data.events[0].start)), " chance to win."];
+			}
+		})()),
+	));
 }
 
 let boardVersion = 0;

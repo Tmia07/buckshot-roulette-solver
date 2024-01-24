@@ -10,8 +10,14 @@
 <div id="page">
 	<!-- <object id="game" data="board.svg?<?php echo(filemtime("board.svg")) ?>"></object> -->
 	<?php readfile('board.svg'); ?>
-	<div id="explorer">
+	<div id="explorer-page">
 		<table>
+			<tr>
+				<td id="summary">Loading...</td>
+			</tr>
+		</table>
+
+		<table id="explorer">
 			<tr id="explorer-header">
 				<th></th>
 				<th>Analysis</th>
@@ -28,6 +34,9 @@
 					<p>Input the game you want to get a solution for by clicking/tapping on the slots.</p>
 					<p>You can also use the mouse wheel to quickly cycle through options.</p>
 					<p>Right click / long tap a slot to clear it.</p>
+				</li>
+				<li>
+					<p>The summary on the top right will give you a simple explanation of the situation.</p>
 				</li>
 				<li>
 					<p>The outcome explorer on the right will display an analysis of the game.</p>
