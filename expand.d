@@ -162,7 +162,7 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 
 		return driver.choice!ShellType(
 			ChoiceMode.randomWithDuplicates,
-			() => "What shell is next?",
+			() => "What shell was in the chamber?",
 			(shellType) {
 				State newState = state;
 				newState.shells[shellType]--;
