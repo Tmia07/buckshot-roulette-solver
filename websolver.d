@@ -277,6 +277,8 @@ void main(string[] args)
 			return score;
 		}
 
+		alias GetScore(T) = Score delegate(T);
+
 		Score choice(T)(
 			ChoiceMode mode,
 			scope string delegate() description,
@@ -285,13 +287,16 @@ void main(string[] args)
 			scope const(T)[] items...
 		) {
 			if (!interactive)
-				return graphChoice(
+			{
+				alias gc = graphChoice!GetScore;
+				return gc!T(
 					mode,
 					description,
 					getScore,
 					getDescription,
 					items,
 				);
+			}
 
 			// First, record the event.
 			JSAnalysis.Event event;

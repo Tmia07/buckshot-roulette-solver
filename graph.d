@@ -60,7 +60,8 @@ void propagateScores(const ScoreTable source, ScoreTable target, Opponent oppone
 			return source[game.packGame()].unpackScore;
 		}
 
-		alias choice = graphChoice;
+		alias GetScore(T) = Score delegate(T) nothrow @nogc;
+		alias choice = graphChoice!GetScore;
 		alias gameOver = graphGameOver;
 	}
 	auto driver = Driver();

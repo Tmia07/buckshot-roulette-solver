@@ -80,6 +80,16 @@ enum Opponent
 
 Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 {
+	// Ugly hack to work around attribute inference with recursion not working, TODO
+	template Dg(string def, Args...)
+	{
+		enum noGC = is(typeof({ static assert(driver.interactive == false); }));
+		static if (noGC)
+			mixin(`alias Dg = ` ~ def ~ ` nothrow @nogc;`);
+		else
+			mixin(`alias Dg = ` ~ def ~ `;`);
+	}
+
 	struct State
 	{
 		Game game;
@@ -93,7 +103,7 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 		ubyte initialHealthMin = 2, initialHealthMax = 4;
 	}
 
-	Score resolveCanHealTo(Dg)(const ref State state0, ubyte targetHealth, scope /*Score delegate(State newState, bool result) nothrow @nogc*/ Dg handler)
+	Score resolveCanHealTo(const ref State state0, ubyte targetHealth, scope Dg!q{Score delegate(State newState, bool result)} handler)
 	{
 		State state1 = state0;
 		state1.initialHealthMin = state1.initialHealthMin.max(state1.health[].fold!max(ubyte(0)));
@@ -144,7 +154,7 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 		}
 	}
 
-	Score resolveRound(Dg)(const ref State state, scope /* Score delegate(ShellType shellType, ref State newState) nothrow @nogc */ Dg handler)
+	Score resolveRound(const ref State state, scope Dg!q{Score delegate(ShellType shellType, ref State newState)} handler)
 	{
 		if (!state.nextShell.isNull)
 		{
@@ -332,7 +342,8 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 						ChoiceMode.random,
 						() => "How many items are granted?",
 						(numItems) {
-							Score grantItems(ref const State state3, Character character)
+							scope Dg!q{Score delegate(ref const State, Character)} grantItems;
+							grantItems = (ref const State state3, Character character)
 							{
 								if (character == enumLength!Character)
 								{
@@ -420,7 +431,7 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 
 								driver.log(() => "Impossible combination of granted items / cigarette packs.");
 								return Score.nan;
-							}
+							};
 							return grantItems(state2, Character.init);
 						},
 						numItems => numItems.to!string,
@@ -461,7 +472,7 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 					Score dealerAI(ref const State state1, bool dealerCanHeal)
 					{
 						Score coinFlip(T)(
-							scope Score delegate(T) getScore,
+							scope Dg!(q{Score delegate(Args[0])}, T) getScore,
 							scope string delegate(T) getDescription,
 							scope T[] items...
 						)
@@ -560,7 +571,7 @@ unittest
 {
 	static struct TestDriver
 	{
-		@property bool interactive() nothrow @nogc { assert(false); }
+		enum interactive = false;
 
 		/// Make a note.
 		void log(scope string delegate() message) nothrow @nogc {}
@@ -576,10 +587,10 @@ unittest
 		Score choice(T)(
 			ChoiceMode mode,
 			scope string delegate() description,
-			scope Score delegate(T) getScore,
+			scope Score delegate(T) nothrow @nogc getScore,
 			scope string delegate(T) getDescription,
 			scope const(T)[] items...
-		) { assert(false); }
+		) nothrow @nogc { assert(false); }
 
 		/// End condition.
 		Score gameOver(bool playerWon) nothrow @nogc { return playerWon ? scoreWin : scoreLose; }
@@ -628,81 +639,84 @@ if (itemCardinality!T != 0)
 }
 
 /// Standard `Driver.choice` implementation.
-Score graphChoice(T)(
-	ChoiceMode mode,
-	scope string delegate() description,
-	scope Score delegate(T) getScore,
-	scope string delegate(T) getDescription,
-	scope const(T)[] items...
-) {
-	final switch (mode)
-	{
-		case ChoiceMode.random:
-			Score sum = 0;
-			size_t total = 0;
-			foreach (item; items)
-			{
-				auto itemScore = getScore(item);
-				if (!itemScore.isNaN)
-				{
-					sum += itemScore;
-					total ++;
-				}
-			}
-			return sum / total;
-
-		case ChoiceMode.randomWithDuplicates:
-			enum card = itemCardinality!T;
-			static if (card)
-			{
-				size_t[card] counts;
-				foreach (T item; items)
-					counts[item.toCardinal()]++;
-
+template graphChoice(alias GetScore)
+{
+	Score graphChoice(T)(
+		ChoiceMode mode,
+		scope string delegate() description,
+		scope GetScore!T getScore,
+		scope string delegate(T) getDescription,
+		scope const(T)[] items...
+	) {
+		final switch (mode)
+		{
+			case ChoiceMode.random:
 				Score sum = 0;
 				size_t total = 0;
-				foreach (index; 0 .. card)
+				foreach (item; items)
 				{
-					auto item = index.fromCardinal!T;
-					auto count = counts[index];
-					if (!count)
-						continue;
-
 					auto itemScore = getScore(item);
 					if (!itemScore.isNaN)
 					{
-						sum += itemScore * count;
-						total += count;
+						sum += itemScore;
+						total ++;
 					}
 				}
 				return sum / total;
 
-			}
-			else
-				assert(false);
+			case ChoiceMode.randomWithDuplicates:
+				enum card = itemCardinality!T;
+				static if (card)
+				{
+					size_t[card] counts;
+					foreach (T item; items)
+						counts[item.toCardinal()]++;
 
-		case ChoiceMode.best:
-			Score bestScore = -Score.max;
-			foreach (item; items)
-			{
-				auto itemScore = getScore(item);
-				if (itemScore > bestScore) // Comparison with NaN will yield false
-					bestScore = itemScore;
-			}
-			assert(bestScore != -Score.max, "All choices are invalid");
-			return bestScore;
+					Score sum = 0;
+					size_t total = 0;
+					foreach (index; 0 .. card)
+					{
+						auto item = index.fromCardinal!T;
+						auto count = counts[index];
+						if (!count)
+							continue;
 
-		case ChoiceMode.worst:
-		case ChoiceMode.unknown:
-			Score worstScore = Score.max;
-			foreach (item; items)
-			{
-				auto itemScore = getScore(item);
-				if (itemScore < worstScore) // Comparison with NaN will yield false
-					worstScore = itemScore;
-			}
-			assert(worstScore != Score.max, "All choices are invalid");
-			return worstScore;
+						auto itemScore = getScore(item);
+						if (!itemScore.isNaN)
+						{
+							sum += itemScore * count;
+							total += count;
+						}
+					}
+					return sum / total;
+
+				}
+				else
+					assert(false);
+
+			case ChoiceMode.best:
+				Score bestScore = -Score.max;
+				foreach (item; items)
+				{
+					auto itemScore = getScore(item);
+					if (itemScore > bestScore) // Comparison with NaN will yield false
+						bestScore = itemScore;
+				}
+				assert(bestScore != -Score.max, "All choices are invalid");
+				return bestScore;
+
+			case ChoiceMode.worst:
+			case ChoiceMode.unknown:
+				Score worstScore = Score.max;
+				foreach (item; items)
+				{
+					auto itemScore = getScore(item);
+					if (itemScore < worstScore) // Comparison with NaN will yield false
+						worstScore = itemScore;
+				}
+				assert(worstScore != Score.max, "All choices are invalid");
+				return worstScore;
+		}
 	}
 }
 
@@ -715,7 +729,8 @@ unittest
 		enum interactive = false;
 		void log(scope string delegate() message) nothrow @nogc {}
 		Score recurse(const ref Game game) nothrow @nogc { return 0; }
-		alias choice = graphChoice;
+		alias GetScore(T) = Score delegate(T) nothrow @nogc;
+		alias choice = graphChoice!GetScore;
 		alias gameOver = graphGameOver;
 	}
 
