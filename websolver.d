@@ -326,15 +326,15 @@ void main(string[] args)
 				{
 					size_t[card] counts;
 					ItemIndex[card] itemIndices;
-					foreach_reverse (ItemIndex itemIndex, item; items)
+					foreach_reverse (ItemIndex itemIndex, T item; items)
 					{
-						counts[item]++;
-						itemIndices[item] = itemIndex;
+						counts[item.toCardinal()]++;
+						itemIndices[item.toCardinal()] = itemIndex;
 					}
 
 					foreach (numericItem; 0 .. card)
 					{
-						auto item = cast(T)numericItem;
+						auto item = numericItem.fromCardinal!T();
 						auto count = counts[numericItem];
 						if (!count)
 							continue;
