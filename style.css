@@ -24,7 +24,6 @@ body {
 	margin: 0 auto;
 
 	display: grid;
-	align-items: center;
 	grid-template: 1fr / 1fr 1fr;
 }
 
@@ -33,12 +32,15 @@ body {
 }
 
 #board {
+	align-self: center;
 	justify-self: end;
 	grid-row: 1;
 	grid-column: 1;
 }
 
 #explorer {
+	grid-row: 1;
+	grid-column: 2;
 	align-self: start;
 	padding-top: 1em;
 	overflow-y: auto;
@@ -87,3 +89,25 @@ input[type="radio"] {
     width: 0.9em;
     height: 0.9em;
 }
+
+#help-page {
+	grid-row: 1;
+	grid-column: 2;
+
+	display: none;
+	position: relative;
+}
+.help-visible #help-page { display: block; }
+.help-visible #explorer { display: none; }
+#help-page > div {
+	color: black;
+	background-color: white;
+	border: 0.21em solid black;
+	padding: 1em 2em;
+
+	/* margin: 1em; */
+	position: absolute;
+	top: 1em; left: 0; bottom: 1em; right: 0;
+	overflow: auto;
+}
+.emoji { font-family: "Noto Color Emoji"; }

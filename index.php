@@ -19,6 +19,43 @@
 			</tr>
 		</table>
 	</div>
+	<div id="help-page">
+		<div>
+			<p>Usage:</p>
+
+			<ol>
+				<li>
+					<p>Input the game you want to get a solution for by clicking/tapping on the slots.</p>
+					<p>You can also use the mouse wheel to quickly cycle through options.</p>
+					<p>Right click / long tap a slot to clear it.</p>
+				</li>
+				<li>
+					<p>The outcome explorer on the right will display an analysis of the game.</p>
+
+					<p>
+						The <b>Win %</b> column will show the likelihood of the game ending with you winning:
+						100% means that a win is guaranteed, and 0% means that a loss is guaranteed.
+					</p>
+
+					<p>
+						For decisions and random events, the analysis will show how each outcome affects the <b>Win %</b>.
+						You can select or change which outcome happens by selecting the corresponding option.
+					</p>
+				</li>
+			</ol>
+
+			<p>Click <span class="emoji">🧹</span> to reset the board to a new game. You can use your web browser back and forward buttons to undo / redo.</p>
+
+			<p>Click <span class="emoji">🔄</span> to flip the board around, if you want to examine your opponent's options.</p>
+
+			<p>Click <span class="emoji">❌</span> to close this help page.</p>
+
+			<p>Links:</p>
+			<ul>
+				<li><a href="https://gist.github.com/CyberShadow/87d403bb29fa3047f2182c41f74e286e">Source code</a></li>
+			</ul>
+		</div>
+	</div>
 	<select id="opponent">
 		<option value="game">Game dealer AI</option>
 		<option value="perfect">Perfect opponent</option>
@@ -33,38 +70,6 @@
 	<div id="status-loading">Loading...</div>
 	<div id="status-error">Error</div>
 	<div id="help"><div>?</div></div>
-	<div id="help-page">
-		<div>
-			<p>Usage:</p>
-
-			<ol>
-				<li>
-					<p>Draw the board you want to get a solution for by clicking/tapping on the spaces.</p>
-					<p>You can also use the mouse wheel to quickly select items.</p>
-					<p>Right click / long tap a slot to clear it.</p>
-				</li>
-			</ol>
-
-			<p>You will see the best move (or moves, if they're equivalent) highlighted in green.</p>
-
-			<p>Your chances of winning (assuming perfect play) are displayed below.  You can tap on the results to "accept" the move and apply it to the board.</p>
-
-			<p>If you see any red squares while drawing the board, these are errors. Fix them, or hover over the error to see what the problem is.</p>
-
-			<p>Click ↻ to reset the board to a new game. You can use your web browser back and forward buttons to undo / redo.</p>
-
-			<p>The solver always assumes that it's your (the bottom player's) turn. The ⇕ button flips the board around, if you want to examine your opponent's options.</p>
-
-			<p>Note that some answers may seem counter-intuitive at first glance. They are correct anyway.</p>
-
-			<p>Links:</p>
-			<ul>
-				<li><a href="https://gitlab.com/CyberShadow/cult-of-the-lamb-knucklebones">Source code</a></li>
-				<li><a href="https://steamcommunity.com/app/1313140/discussions/0/5267542371389134136/">Discussion</a></li>
-				<li><a href="https://steamcommunity.com/sharedfiles/filedetails/?id=2848999174">Guide with more information about Knucklebones</a></li>
-			</ul>
-		</div>
-	</div>
 </div>
 -->
 

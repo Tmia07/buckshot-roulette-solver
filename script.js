@@ -13,6 +13,7 @@ const defaultGame = {
 
 let currentGame = defaultGame;
 let showGameFuncs = [];
+let resetGameFuncs = [];
 
 function showGame(game) {
 	document.querySelectorAll('.value').forEach(e => e.remove());
@@ -22,6 +23,22 @@ function showGame(game) {
 }
 
 function copyGame(game) { return JSON.parse(JSON.stringify(game)); }
+
+function flipBoard() {
+	let game = copyGame(currentGame);
+	game.currentTurn = game.currentTurn == 'player' ? 'dealer' : 'player';
+	game.items.reverse();
+	game.items[0].reverse();
+	game.items[1].reverse();
+	game.health.reverse();
+	game.handcuffs.reverse();
+	currentGame = game;
+}
+
+function resetBoard() {
+	for (let func of resetGameFuncs)
+		func(currentGame);
+}
 
 document.addEventListener('DOMContentLoaded', function() {
 	function addControl(type, slot, path, values, valueIDs) {
@@ -42,29 +59,29 @@ document.addEventListener('DOMContentLoaded', function() {
 			v[path[path.length-1]] = value;
 		}
 
-		function cycleValue(indexUpdateFun) {
-			let oldValue = getValue(currentGame);
+		function cycleValue(game, indexUpdateFun) {
+			let oldValue = getValue(game);
 			let oldValueIndex = values.indexOf(oldValue);
 			let newValueIndex = indexUpdateFun(oldValueIndex);
 			newValueIndex = (newValueIndex + values.length) % values.length;
 			let newValue = values[newValueIndex];
-			setValue(currentGame, newValue);
+			setValue(game, newValue);
 
 			validate();
 		}
 
 		slotNode.addEventListener('mousedown', function(event) {
 			if (event.button == 0) {
-				cycleValue(index => index + 1);
+				cycleValue(currentGame, index => index + 1);
 				event.preventDefault();
 			}
 		});
 		slotNode.addEventListener('wheel', function(event) {
-			cycleValue(index => index + Math.sign(event.deltaX + event.deltaY));
+			cycleValue(currentGame, index => index + Math.sign(event.deltaX + event.deltaY));
 			event.preventDefault();
 		});
 		slotNode.addEventListener('contextmenu', function(event) {
-			cycleValue(index => 0);
+			cycleValue(currentGame, index => 0);
 			event.preventDefault();
 		});
 
@@ -84,6 +101,10 @@ document.addEventListener('DOMContentLoaded', function() {
 					slotNode.appendChild(valueNode);
 				}
 			}
+		});
+
+		resetGameFuncs.push((game) => {
+			cycleValue(game, index => 0);
 		});
 	}
 	addControl('handle', null, ['currentTurn'], ['player', 'dealer'], (currentTurn) => {
@@ -109,24 +130,6 @@ document.addEventListener('DOMContentLoaded', function() {
 	// TODO load game from URL
 	validate();
 });
-
-// function flipBoard() {
-// 	for (let row = 0; row < numRows; row++) {
-// 		for (let column = 0; column < numColumns; column++) {
-// 			const indexA = getDieIndex(0,               row, column);
-// 			const indexB = getDieIndex(1, numRows - 1 - row, column);
-// 			const a = getDieValue(indexA);
-// 			const b = getDieValue(indexB);
-// 			setDieValue(indexA, b);
-// 			setDieValue(indexB, a);
-// 		}
-// 	}
-// }
-
-// function resetBoard() {
-// 	for (let dieIndex = 0; dieIndex < numDice; dieIndex++)
-// 		setDieValue(dieIndex, 0);
-// }
 
 // function save() {
 // 	let result = '';
@@ -364,17 +367,20 @@ function validate(now) {
 }
 
 (function() {
-// 	document.getElementById('flip').addEventListener('click', function() {
-// 		flipBoard();
-// 		validate();
-// 	});
+	document.getElementById('button-flip').addEventListener('click', function(e) {
+		e.preventDefault();
+		flipBoard();
+		validate(true);
+	});
 
-// 	document.getElementById('reset').addEventListener('click', function() {
-// 		resetBoard();
-// 		validate(true);
-// 	});
+	document.getElementById('button-reset').addEventListener('click', function(e) {
+		e.preventDefault();
+		resetBoard();
+		validate(true);
+	});
 
-	document.getElementById('opponent').addEventListener('change', function() {
+	document.getElementById('opponent').addEventListener('change', function(e) {
+		e.preventDefault();
 		validate(true);
 	});
 
@@ -422,10 +428,11 @@ function validate(now) {
 	}
 	updateSize();
 
-// 	var helpVisible = false;
-// 	document.getElementById('help').addEventListener('click', function() {
-// 		helpVisible = !helpVisible;
-// 		document.getElementById('help-page').style.display = helpVisible ? "block" : "none";
-// 		document.querySelector('#help div').textContent = helpVisible ? '×' : '?';
-// 	});
+	var helpVisible = false;
+	document.getElementById('button-help').addEventListener('click', function(e) {
+		e.preventDefault();
+		helpVisible = !helpVisible;
+		document.body.classList.toggle('help-visible', helpVisible);
+		document.querySelector('#button-help text').textContent = helpVisible ? '❌' : 'ℹ️';
+	});
 })();

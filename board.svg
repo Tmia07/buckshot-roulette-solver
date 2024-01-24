@@ -8,6 +8,8 @@
     .dealer-turn #gun  { transform: translate(32px, 32px) rotate(180deg) translate(-32px, -32px); }
 
     .demo { display: none; }
+
+    #buttons > g { cursor: pointer; }
   </style>
 
   <defs>
@@ -32,8 +34,8 @@
     </g>
 
     <g id="bg-handcuffs"><rect width="8" height="6" fill="inherit" stroke="inherit" stroke-width="0.5" /></g>
-    <g id="handcuffs-willSkip" ><text x="4" y="3" style="font-size: 4px; text-anchor: middle; dominant-baseline: central">🔗</text></g>
-    <g id="handcuffs-willBreak"><text x="4" y="3" style="font-size: 4px; text-anchor: middle; dominant-baseline: central">⛓️‍💥</text></g>
+    <g id="handcuffs-willSkip" ><text x="4" y="3" style="font-size: 4px; text-anchor: middle; dominant-baseline: central">🔗</text><title>Next turn will be skipped</title></g>
+    <g id="handcuffs-willBreak"><text x="4" y="3" style="font-size: 4px; text-anchor: middle; dominant-baseline: central">⛓️‍💥</text><title>Next turn the handcuffs will break</title></g>
 
     <g id="bg-barrel"  ><rect width="1" height="6" fill="inherit" stroke="inherit" stroke-width="0.5" /></g>
     <g id="barrel-cutoff"      ><text x="0.5" y="3" style="font-size: 4px; text-anchor: middle; dominant-baseline: central">❌</text></g>
@@ -126,4 +128,22 @@
 
   <g transform="translate(58, 25)            " id="slot-health-1"><use href="#bg-health"/><title>Click to set the dealer's remaining charges.</title><use class="demo" href="#health-4"/></g>
   <g transform="translate(62, 39) rotate(180)" id="slot-health-0"><use href="#bg-health"/><title>Click to set your remaining charges.</title><use class="demo" href="#health-1"/></g>
+
+  <g transform="translate(38, 61)" id="buttons">
+    <g transform="translate( 0, 0)" id="button-reset">
+      <rect width="6" height="6" stroke-width="0.5" />
+      <text x="3" y="3" style="font-size: 4px; text-anchor: middle; dominant-baseline: central">🧹</text>
+      <title>Click to clear the board.</title>
+    </g>
+    <g transform="translate( 7, 0)" id="button-flip">
+      <rect width="6" height="6" stroke-width="0.5" />
+      <text x="3" y="3" style="font-size: 4px; text-anchor: middle; dominant-baseline: central">🔄</text>
+      <title>Click to flip the board.</title>
+    </g>
+    <g transform="translate(14, 0)" id="button-help">
+      <rect width="6" height="6" stroke-width="0.5" />
+      <text x="3" y="3" style="font-size: 4px; text-anchor: middle; dominant-baseline: central">ℹ️</text>
+      <title>Click to read help.</title>
+    </g>
+  </g>
 </svg>
