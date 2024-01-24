@@ -141,7 +141,7 @@ struct JSGame
 			);
 		if (game.handcuffs[game.currentTurn])
 			throw new JSGameError("A handcuffed player cannot have the current turn.",
-				["handcuffs-" ~ text(ubyte(game.currentTurn)), "current-turn"]
+				["handcuffs-" ~ text(ubyte(game.currentTurn)), "handle"]
 			);
 		game.shotgunSawedOff = this.shotgunSawedOff;
 		return game;

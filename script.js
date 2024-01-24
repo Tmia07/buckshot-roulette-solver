@@ -68,18 +68,25 @@ document.addEventListener('DOMContentLoaded', function() {
 		showGameFuncs.push((game) => {
 			let value = getValue(game);
 			let valueIndex = values.indexOf(value);
-			let valueID = valueIDs[valueIndex];
-			if (valueID !== null) {
-				valueID = type + '-' + valueID;
+			if (typeof valueIDs === 'function')
+				valueIDs(value);
+			else {
+				let valueID = valueIDs[valueIndex];
+				if (valueID !== null) {
+					valueID = type + '-' + valueID;
 
-				let valueNode = document.createElementNS("http://www.w3.org/2000/svg", 'use');
-				valueNode.setAttribute('class', 'value');
-				valueNode.setAttributeNS("http://www.w3.org/1999/xlink", 'href', '#' + valueID);
-				slotNode.appendChild(valueNode);
+					let valueNode = document.createElementNS("http://www.w3.org/2000/svg", 'use');
+					valueNode.setAttribute('class', 'value');
+					valueNode.setAttributeNS("http://www.w3.org/1999/xlink", 'href', '#' + valueID);
+					slotNode.appendChild(valueNode);
+				}
 			}
 		});
 	}
-	// TODO: currentTurn
+	addControl('handle', null, ['currentTurn'], ['player', 'dealer'], (currentTurn) => {
+		let e = document.getElementById('board');
+		e.classList.toggle('dealer-turn', currentTurn === 'dealer');
+	});
 	for (let i = 0; i < defaultGame.shells.length; i++)
 		addControl('shell', i, ['shells', i], [null, 'blank', 'live'], [null, 'blank', 'live']);
 	addControl('shell', 'next', ['nextShell'], [null, 'blank', 'live'], ['unknown', 'blank', 'live']);
