@@ -318,14 +318,136 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 		// Use a different flow depending on if the driver is interactive.
 		// If yes, use a series of questions suitable for interactive use (humans).
 		// If no, use a more efficient flow with fewer questions.
-		if (/*driver.interactive*/false)
+		// The result should be the same.
+		if (driver.interactive)
 		{
 			// Ask questions in the order that the game presents information to players.
 			enum Phase
 			{
 				playerItems,
-				
+				shells,
+				dealerItems,
+				end,
 			}
+			static struct AskState
+			{
+				State state;
+				alias state this;
+
+				Phase phase;
+				size_t[enumLength!Character] itemIndex;
+			}
+
+			scope Dg!(q{Score delegate(ref const Args[0])}, AskState) ask;
+			ask = (ref const AskState state2)
+			{
+				Score nextPhase(ref const AskState state3)
+				{
+					AskState state4 = state3;
+					state4.phase++;
+					return ask(state4);
+				}
+
+				final switch (state2.phase)
+				{
+					case Phase.playerItems:
+					case Phase.dealerItems:
+						auto character = state2.phase == Phase.playerItems ? Character.player : Character.dealer;
+						auto itemsSoFar = state2.itemIndex[character];
+
+						enum maxGrantedItems = 4;
+
+						// The player gets between 0 and 4 items.  The dealer always gets the same amount.
+						auto minItems = character == Character.player ? 0 : state2.itemIndex[Character.player];
+						auto maxItems = character == Character.player ? 4 : state2.itemIndex[Character.player];
+
+						if (itemsSoFar == maxItems)
+							return nextPhase(state2);
+
+						enum maxItemChoices = (enumLength!Item + 1) * (maxGrantedItems + 1);
+						Nullable!Item[maxItemChoices] itemChoices; size_t numItemChoices;
+
+						// Some slightly hairy math, in order to fairly represent the linear
+						// distribution of number of granted items without asking additional questions:
+						size_t noItemChanceNumerator, noItemChanceDenominator;
+						if (itemsSoFar < minItems)
+						{
+							noItemChanceNumerator = 0;
+							noItemChanceDenominator = 1;
+						}
+						else
+						{
+							noItemChanceNumerator = 1;
+							noItemChanceDenominator = (maxItems - minItems + 1) - (itemsSoFar - minItems);
+						}
+
+						foreach (item; Item.init .. enumLength!Item)
+						{
+							bool canAdd = {
+								switch (item)
+								{
+									case Item.cigarettePack:
+										return state2.items[character][Item.cigarettePack] < 2;
+									default:
+										return true;
+								}
+							}();
+							if (!canAdd)
+								continue;
+
+							foreach (i; 0 .. noItemChanceDenominator)
+							{
+								if (i < noItemChanceNumerator)
+									itemChoices[numItemChoices++] = Nullable!Item.init;
+								else
+									itemChoices[numItemChoices++] = item;
+							}
+						}
+
+						return driver.choice!(Nullable!Item)(
+							ChoiceMode.randomWithDuplicates,
+							() => "What is the " ~ ["first", "second", "third", "fourth"][state2.itemIndex[character]] ~ " item that " ~ (character == Character.player ? "you get" : "the dealer gets") ~ "?",
+							(item) {
+								if (item.isNull)
+									return nextPhase(state2);
+								else
+								{
+									AskState state3 = state2;
+									state3.items[character][item.get()]++;
+									state3.itemIndex[character]++;
+									return ask(state3);
+								}
+							},
+							(item) => item.isNull
+								? "Nothing (no " ~ (itemsSoFar == 0 ? "" : "more ") ~ "items)"
+								: capitalize(itemDescriptions[item.get()]),
+							itemChoices[0 .. numItemChoices],
+						);
+
+					case Phase.shells:
+						return driver.choice!ubyte(
+							ChoiceMode.random,
+							() => "How many shells are loaded?",
+							(totalShells) {
+								AskState state3 = state2;
+								auto liveShells = cast(ubyte)(totalShells / 2); // rounding down
+								auto blankShells = cast(ubyte)(totalShells - liveShells);
+								driver.log(() => blankShells.to!string ~ " blank, " ~ liveShells.to!string ~ " live.");
+								state3.shells[ShellType.blank] = blankShells;
+								state3.shells[ShellType.live] = liveShells;
+								return nextPhase(state3);
+							},
+							totalShells => totalShells.to!string,
+							2, 3, 4, 5, 6, 7, 8
+						);
+
+					case Phase.end:
+						driver.log(() => "Round begins.");
+						return driver.recurse(state2);
+				}
+			};
+			auto askState = AskState(state1);
+			return ask(askState);
 		}
 		else
 			// Refill magazine.
