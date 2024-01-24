@@ -192,25 +192,40 @@ const choiceProbabilityFormatter = new Intl.NumberFormat('en-US', {
 
 var choiceCounter = 0;
 
+function node(tagName, attributes, children) {
+	let e = document.createElement(tagName);
+	if (typeof attributes !== 'undefined')
+		for (let name in attributes)
+			e.setAttribute(name, attributes[name]);
+	if (typeof children !== 'undefined') {
+		if (typeof children === 'string')
+			e.textContent = children;
+		else {
+			if (!Array.isArray(children))
+				children = [children];
+			for (let child of children) {
+				if (typeof child === 'string')
+					child = document.createTextNode(child);
+				e.appendChild(child);
+			}
+		}
+	}
+	return e;
+}
+
 function addAnalysis(data, rowAfter) {
 	while (rowAfter.nextSibling)
 		rowAfter.nextSibling.remove();
 
 	function addEvent(icon, text, winPercent) {
-		let tr = document.createElement('TR');
-		let td0 = document.createElement('TD');
-		td0.textContent = icon;
-		tr.appendChild(td0);
-		let td1 = document.createElement('TD');
-		if (typeof text === 'string')
-			td1.textContent = text;
-		else
-			td1.appendChild(text);
-		tr.appendChild(td1);
-		let td2 = document.createElement('TD');
-		if (winPercent !== undefined && winPercent !== null)
-			td2.textContent = winPercentFormatter.format(winPercent);
-		tr.appendChild(td2);
+		const tr = node('TR', {}, [
+			node('TD', {}, icon),
+			node('TD', {}, text),
+			node('TD', {}, winPercent === undefined || winPercent === null
+				 ? undefined
+				 : winPercentFormatter.format(winPercent)
+			)
+		]);
 		rowAfter.parentElement.appendChild(tr);
 		return tr;
 	}
@@ -256,17 +271,18 @@ function addAnalysis(data, rowAfter) {
 				let description = option.description;
 				if ('probability' in option)
 					description = '[' + choiceProbabilityFormatter.format(option.probability) + '] ' + description;
-				let label = document.createElement('LABEL');
-				let radio = document.createElement('INPUT');
-				radio.type = 'radio';
-				radio.name = 'choice-' + choiceCounter;
-				radio.id = 'choice-' + choiceCounter + '-' + i;
-				radio.value = i;
+				let radio = node('INPUT', {
+					type: 'radio',
+					name: 'choice-' + choiceCounter,
+					id: 'choice-' + choiceCounter + '-' + i,
+					value: i
+				});
 				if ('selectedOption' in event.choice && i == event.choice.selectedOption)
 					radio.checked = 'checked';
-				label.for = radio.id;
-				label.appendChild(radio);
-				label.appendChild(document.createTextNode(description));
+				let label = node('LABEL', { for: radio.id }, [
+					radio,
+					description,
+				]);
 				radio.addEventListener('change', function() {
 					const problem = {
 						// opponent: document.getElementById('opponent').value,
