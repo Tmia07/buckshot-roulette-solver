@@ -295,7 +295,12 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 		State state1 = state0;
 
 		// Handcuffs come off. How will you grab the items otherwise?
-		state1.handcuffs[] = HandcuffState.none;
+		foreach (Character character, ref handcuffState; state1.handcuffs)
+			if (handcuffState)
+			{
+				driver.log(() => (character == Character.player ? "Your" : "The dealer's") ~ " handcuffs come off.");
+				handcuffState = HandcuffState.none;
+			}
 
 		// Refill magazine.
 		return driver.choice!ubyte(
