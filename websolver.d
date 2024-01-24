@@ -54,19 +54,19 @@ struct JSGame
 		if (!game.nextShell.isNull)
 			game.shells[game.nextShell.get()]++; // Encode that one, too
 		foreach (shellType; ShellType.init .. enumLength!ShellType)
-			while (this.toGame().shells[shellType] > game.shells[shellType])
+			while (this.toGame(false).shells[shellType] > game.shells[shellType])
 				this.shells[this.shells[].lastIndexOf(shellType.nullable)] = Nullable!ShellType.init;
 		foreach (shellType; ShellType.init .. enumLength!ShellType)
-			while (this.toGame().shells[shellType] < game.shells[shellType])
+			while (this.toGame(false).shells[shellType] < game.shells[shellType])
 				this.shells[this.shells[].indexOf(Nullable!ShellType.init)] = shellType.nullable;
 
 		foreach (character; Character.init .. enumLength!Character)
 		{
 			foreach (item; Item.init .. enumLength!Item)
-				while (this.toGame().items[character][item] > game.items[character][item])
+				while (this.toGame(false).items[character][item] > game.items[character][item])
 					this.items[character][this.items[character][].lastIndexOf(item.nullable)] = Nullable!Item.init;
 			foreach (item; Item.init .. enumLength!Item)
-				while (this.toGame().items[character][item] < game.items[character][item])
+				while (this.toGame(false).items[character][item] < game.items[character][item])
 					this.items[character][this.items[character][].indexOf(Nullable!Item.init)] = item.nullable;
 		}
 
@@ -82,10 +82,10 @@ struct JSGame
 
 		this.shotgunSawedOff = game.shotgunSawedOff;
 
-		assert(this.toGame() == game);
+		assert(this.toGame(false) == game);
 	}
 
-	Game toGame() const
+	Game toGame(bool strict = true) const
 	{
 		Game game;
 
@@ -95,7 +95,7 @@ struct JSGame
 			if (!shell.isNull)
 				game.shells[shell.get()]++;
 		foreach (shellType; ShellType.init .. enumLength!ShellType)
-			if (game.shells[shellType] > maxShells / 2)
+			if (strict && game.shells[shellType] > maxShells / 2)
 				throw new JSGameError("Cannot have that many shells of one type.",
 					maxShells.iota
 					.filter!(shellIndex => this.shells[shellIndex] == shellType.nullable)
@@ -106,7 +106,7 @@ struct JSGame
 		if (!this.nextShell.isNull)
 		{
 			auto shellType = this.nextShell.get();
-			if (!game.shells[shellType])
+			if (strict && !game.shells[shellType])
 				throw new JSGameError("Shells / next shell discrepancy.",
 					maxShells.iota
 					.map!(shellIndex => "shell-" ~ text(shellIndex))
@@ -120,7 +120,7 @@ struct JSGame
 			foreach (item; this.items[character])
 				if (!item.isNull)
 					game.items[character][item.get()]++;
-			if (game.items[character][Item.cigarettePack] > 2)
+			if (strict && game.items[character][Item.cigarettePack] > 2)
 				throw new JSGameError("Cannot have that many cigarette packs.",
 					maxItems.iota
 					.filter!(itemIndex => this.items[character][itemIndex] == Item.cigarettePack.nullable)
@@ -135,11 +135,11 @@ struct JSGame
 		}
 		foreach (character; Character.init .. enumLength!Character)
 			game.handcuffs[character] = this.handcuffs[character].get(HandcuffState.none);
-		if (game.handcuffs[Character.player] && game.handcuffs[Character.dealer])
+		if (strict && game.handcuffs[Character.player] && game.handcuffs[Character.dealer])
 			throw new JSGameError("Only one character may be handcuffed at a time.",
 				["handcuffs-0", "handcuffs-1"]
 			);
-		if (game.handcuffs[game.currentTurn])
+		if (strict && game.handcuffs[game.currentTurn])
 			throw new JSGameError("A handcuffed player cannot have the current turn.",
 				["handcuffs-" ~ text(ubyte(game.currentTurn)), "handle"]
 			);
@@ -168,7 +168,7 @@ struct JSProblem
 struct JSAnalysis
 {
 	JSGame game;
-	string packedGame;
+	@JSONOptional string packedGame;
 
 	struct Event
 	{
@@ -210,6 +210,13 @@ struct JSAnalysis
 		@JSONOptional Nullable!bool gameOver;
 	}
 	Event[] events;
+
+	struct ValidationError
+	{
+		string message;
+		string[] ids;
+	}
+	@JSONOptional ValidationError validationError;
 }
 
 void main(string[] args)
@@ -454,36 +461,30 @@ void main(string[] args)
 		}
 	}
 
-	auto jsGame = problem.packedGame
-		? problem.packedGame.to!PackedGame.unpackGame().JSGame(JSGame.init)
-		: problem.game;
+	try
+	{
+		auto jsGame = problem.packedGame
+			? problem.packedGame.to!PackedGame.unpackGame().JSGame(JSGame.init)
+			: problem.game;
+		analysis.game = jsGame;
 
-	Game game;
-	if (problem.packedGame)
-		game = problem.packedGame.to!PackedGame.unpackGame();
-	else
-		try
+		Game game;
+		if (problem.packedGame)
+			game = problem.packedGame.to!PackedGame.unpackGame();
+		else
 			game = problem.game.toGame();
-		catch (JSGameError e)
-		{
-			struct ValidationFailureResponse
-			{
-				struct Error
-				{
-					string message;
-					string[] ids;
-				}
-				Error validationError;
-			}
-			stdout.writeln(ValidationFailureResponse(ValidationFailureResponse.Error(e.msg, e.badIDs)).toJson);
-			return;
-		}
-	analysis.game = jsGame;
-	analysis.packedGame = game.packGame().to!string;
+		analysis.packedGame = game.packGame().to!string;
 
-	auto driver = Driver();
-	driver.recursedGames = [jsGame];
-	driver.run(game);
+		auto driver = Driver();
+		driver.recursedGames = [jsGame];
+		driver.run(game);
+	}
+	catch (JSGameError e)
+	{
+		analysis.validationError = JSAnalysis.ValidationError(e.msg, e.badIDs);
+		stdout.writeln(analysis.toJson);
+		return;
+	}
 
 	// auto scores = new RemoteScores(problem.opponent);
 	// Analysis analysis;

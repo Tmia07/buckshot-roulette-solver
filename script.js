@@ -248,16 +248,19 @@ function queryProblem(problem, delay, noSave) {
 		.then((data) => {
 			if (requestVersion != stateVersion)
 				return; // outdated
-			currentGame = copyGame(data.game);
-			showGame(currentGame);
+			if ('game' in data) {
+				currentGame = copyGame(data.game);
+				showGame(currentGame);
+			}
 			addAnalysis(problem, data);
-
-			problem.game = data.game;
-			problem.packedGame = data.packedGame;
-			if (noSave)
-				window.history.replaceState(problem, '', '#' + serialize(problem));
-			else
-				window.history.pushState(problem, '', '#' + serialize(problem));
+			if ('game' in data && 'packedGame' in data) {
+				problem.game = data.game;
+				problem.packedGame = data.packedGame;
+				if (noSave)
+					window.history.replaceState(problem, '', '#' + serialize(problem));
+				else
+					window.history.pushState(problem, '', '#' + serialize(problem));
+			}
 			document.body.classList.toggle('loading', false);
 		})
 		.catch((error) => {
