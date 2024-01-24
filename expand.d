@@ -304,6 +304,9 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 
 		State state1 = state0;
 
+		// It's always the player's turn first.
+		state1.currentTurn = Character.player;
+
 		// Handcuffs come off. How will you grab the items otherwise?
 		foreach (Character character, ref handcuffState; state1.handcuffs)
 			if (handcuffState)
@@ -349,12 +352,8 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 								{
 									// Done granting items.
 
-									// It's always the player's turn first.
-									State state4 = state3;
-									state4.currentTurn = Character.player;
-
 									driver.log(() => "Round begins.");
-									return driver.recurse(state4);
+									return driver.recurse(state3);
 								}
 
 								auto remainingRoom = maxItems - state3.totalItems(character);
