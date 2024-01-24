@@ -21,6 +21,8 @@ function showGame(game) {
 		func(game);
 }
 
+function copyGame(game) { return JSON.parse(JSON.stringify(game)); }
+
 document.addEventListener('DOMContentLoaded', function() {
 	function addControl(type, slot, path, values, valueIDs) {
 		let slotID = 'slot-' + type + (slot !== null ? '-' + slot : '');
@@ -213,7 +215,7 @@ function node(tagName, attributes, children) {
 	return e;
 }
 
-function addAnalysis(data, rowAfter) {
+function addAnalysis(problem, data, rowAfter) {
 	while (rowAfter.nextSibling)
 		rowAfter.nextSibling.remove();
 
@@ -228,6 +230,17 @@ function addAnalysis(data, rowAfter) {
 		]);
 		rowAfter.parentElement.appendChild(tr);
 		return tr;
+	}
+
+	function gameLink(o) {
+		const link = node('A', {href: '#' + o.packedGame + '/' + problem.opponent}, 'Game #' + o.packedGame);
+		link.addEventListener('click', function(e) {
+			e.preventDefault();
+			// TODO: use history.pushState instead
+			currentGame = copyGame(o.game);
+			validate(true);
+		});
+		return link;
 	}
 
 	if ('error' in data) {
@@ -249,7 +262,7 @@ function addAnalysis(data, rowAfter) {
 			addEvent('ℹ️', event.message);
 		else
 		if ('start' in event)
-			addEvent('🚀', 'Analyzing Game #' + data.packedGame + '.', event.start);
+			addEvent('🚀', ['Analyzing ', gameLink(data), '.'], event.start);
 		else
 		if ('choice' in event) {
 			choiceCounter++;
@@ -299,6 +312,7 @@ function addAnalysis(data, rowAfter) {
 					.then((response) => response.json())
 					.then((data) => {
 						addAnalysis(
+							problem,
 							data,
 							lastRow,
 						);
@@ -312,7 +326,7 @@ function addAnalysis(data, rowAfter) {
 		}
 		else
 		if ('recursion' in event) {
-			addEvent('📍', 'Checkpoint: Game #' + event.recursion.packedGame + '.', event.recursion.score);
+			addEvent('📍', ['Checkpoint: ', gameLink(event.recursion), '.'], event.recursion.score);
 		}
 		else
 		if ('gameOver' in event) {
@@ -441,6 +455,7 @@ function validate(now) {
 				return; // outdated
 
 			addAnalysis(
+				problem,
 				data,
 				document.getElementById('explorer-header'),
 			);
