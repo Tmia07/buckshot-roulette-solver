@@ -40,7 +40,7 @@ struct JSGame
 	Nullable!ShellType[maxShells] shells;
 	Nullable!ShellType nextShell; // includes a shell from `shells`, unlike `Game`
 	Nullable!Item[maxItems][enumLength!Character] items;
-	ubyte[enumLength!Character] health;
+	ubyte[enumLength!Character] health = [1, 1];
 	Nullable!HandcuffState[enumLength!Character] handcuffs; // `null` <=> `HandcuffState.none`
 	bool shotgunSawedOff;
 
