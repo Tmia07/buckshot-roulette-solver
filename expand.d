@@ -101,7 +101,7 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 		if (targetHealth > state1.initialHealthMax)
 			return handler(state1, false);
 		else
-		if (targetHealth <= state1.initialHealthMax)
+		if (targetHealth <= state1.initialHealthMin)
 			return handler(state1, true);
 		else
 			return driver.choice!bool(
@@ -221,54 +221,53 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 		});
 	}
 
-	Score use(ref const State state, Item item)
+	Score use(ref const State state0, Item item)
 	{
-		if (!state.items[state.currentTurn][item])
+		if (!state0.items[state0.currentTurn][item])
 			return Score.nan;
-		driver.log(() => (state.currentTurn == Character.player ? "You use " : "The dealer uses ") ~ itemDescriptions[item] ~ ".");
-		State newState = state;
-		newState.items[state.currentTurn][item]--;
+		driver.log(() => (state0.currentTurn == Character.player ? "You use " : "The dealer uses ") ~ itemDescriptions[item] ~ ".");
+		State state1 = state0;
+		state1.items[state1.currentTurn][item]--;
 		final switch (item)
 		{
 			case Item.handcuffs:
-				if (newState.handcuffs[newState.currentTurn.other])
+				if (state1.handcuffs[state1.currentTurn.other])
 					return Score.nan;
-				newState.handcuffs[newState.currentTurn.other] = HandcuffState.willSkip;
-				driver.log(() => (newState.currentTurn.other == Character.player ? "You are" : "The dealer is") ~ " now handcuffed.");
-				return driver.recurse(newState);
+				state1.handcuffs[state1.currentTurn.other] = HandcuffState.willSkip;
+				driver.log(() => (state1.currentTurn.other == Character.player ? "You are" : "The dealer is") ~ " now handcuffed.");
+				return driver.recurse(state1);
 			case Item.lookingGlass:
-				if (!newState.nextShell.isNull)
+				if (!state1.nextShell.isNull)
 					return Score.nan;
-				return resolveRound(newState, (ShellType shellType, ref State newState) {
-					driver.log(() => (newState.currentTurn == Character.player ? "You now know" : "The dealer now knows") ~ " that the next shell is " ~ shellType.to!string ~ ".");
-					newState.nextShell = shellType;
-					return driver.recurse(newState);
+				return resolveRound(state1, (ShellType shellType, ref State state2) {
+					driver.log(() => (state2.currentTurn == Character.player ? "You now know" : "The dealer now knows") ~ " that the next shell is " ~ shellType.to!string ~ ".");
+					state2.nextShell = shellType;
+					return driver.recurse(state2);
 				});
 			case Item.beer:
-				return resolveRound(newState, (ShellType shellType, ref State newState) {
-					driver.log(() => (newState.currentTurn == Character.player ? "You rack" : "The dealer racks") ~ " the shotgun, and a " ~ shellType.to!string ~ " shell is ejected.");
-					return driver.recurse(newState);
+				return resolveRound(state1, (ShellType shellType, ref State state2) {
+					driver.log(() => (state2.currentTurn == Character.player ? "You rack" : "The dealer racks") ~ " the shotgun, and a " ~ shellType.to!string ~ " shell is ejected.");
+					return driver.recurse(state2);
 				});
 			case Item.cigarettePack:
-				Score smoke(bool canHeal)
+				Score smoke(State state2, bool canHeal)
 				{
 					if (canHeal)
 					{
-						driver.log(() => (newState.currentTurn == Character.player ? "You restore" : "The dealer restores") ~ " one charge.");
-						newState.health[state.currentTurn]++;
+						driver.log(() => (state2.currentTurn == Character.player ? "You restore" : "The dealer restores") ~ " one charge.");
+						state2.health[state2.currentTurn]++;
 					}
 					else
-						driver.log(() => (newState.currentTurn == Character.player ? "You are" : "The dealer is") ~ " already at maximum charges.");
-					return driver.recurse(newState);
+						driver.log(() => (state2.currentTurn == Character.player ? "You are" : "The dealer is") ~ " already at maximum charges.");
+					return driver.recurse(state2);
 				}
-				return resolveCanHealTo(state, cast(ubyte)(newState.health[state.currentTurn] + 1),
-					(State newState, bool result) { return smoke(result); });
+				return resolveCanHealTo(state1, cast(ubyte)(state1.health[state1.currentTurn] + 1), &smoke);
 			case Item.handSaw:
-				if (newState.shotgunSawedOff)
+				if (state1.shotgunSawedOff)
 					return Score.nan;
-				newState.shotgunSawedOff = true;
+				state1.shotgunSawedOff = true;
 				driver.log(() => "The shotgun barrel is now sawed off.");
-				return driver.recurse(newState);
+				return driver.recurse(state1);
 		}
 	}
 
@@ -492,7 +491,7 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 						Move[enumLength!Item] itemOptions; size_t numItemOptions;
 						if (state1.items[state1.currentTurn][Item.lookingGlass] && !dealerKnowsShell && state1.totalShells != 1)
 							itemOptions[numItemOptions++] = Move.useLookingGlass;
-						if (state1.items[state1.currentTurn][Item.cigarettePack] && state1.health[state1.currentTurn] < dealerCanHeal)
+						if (state1.items[state1.currentTurn][Item.cigarettePack] && dealerCanHeal)
 							itemOptions[numItemOptions++] = Move.useCigarettePack;
 						if (state1.items[state1.currentTurn][Item.beer] && knownShell != ShellType.live.nullable && state1.totalShells != 1)
 							itemOptions[numItemOptions++] = Move.useBeer;
