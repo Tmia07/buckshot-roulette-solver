@@ -156,7 +156,7 @@ struct JSProblem
 {
 	Opponent opponent;
 
-	JSGame game;
+	Nullable!JSGame game;
 	// -- or --
 	string packedGame;
 
@@ -461,16 +461,18 @@ void main(string[] args)
 
 	try
 	{
-		auto jsGame = problem.packedGame
-			? problem.packedGame.to!PackedGame.unpackGame().JSGame(JSGame.init)
-			: problem.game;
+		JSGame jsGame = {
+			if (!problem.game.isNull) return problem.game.get;
+			if (problem.packedGame) return problem.packedGame.to!PackedGame.unpackGame().JSGame(JSGame.init);
+			throw new Exception("No game");
+		}();
 		analysis.game = jsGame;
 
 		Game game;
 		if (problem.packedGame)
 			game = problem.packedGame.to!PackedGame.unpackGame();
 		else
-			game = problem.game.toGame();
+			game = problem.game.get().toGame();
 		analysis.packedGame = game.packGame().to!string;
 
 		auto driver = Driver();
