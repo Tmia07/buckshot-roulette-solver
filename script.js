@@ -229,6 +229,8 @@ function queryProblem(problem, delay, noSave) {
 	setTimeout(function() {
 		if (requestVersion != stateVersion)
 			return; // outdated
+		if (dragging)
+			return;
 
 		// const state = save();
 		// const hash = '#' + state;
@@ -248,6 +250,8 @@ function queryProblem(problem, delay, noSave) {
 		.then((data) => {
 			if (requestVersion != stateVersion)
 				return; // outdated
+			if (dragging)
+				return;
 			if ('game' in data) {
 				currentGame = copyGame(data.game);
 				showGame(currentGame);
@@ -323,7 +327,81 @@ function handleGameEdit(now) {
 	queryProblem(problem, now ? 0 : 500);
 }
 
+
+// Note: The HTML drag and drop API (dragstart / dragover / drop) does not work on SVG elements.
+
+var dragging = false;
+var lastDropTarget = null;
+
+function makeDraggable(node, data, handleFeedback) {
+	function getDropTarget(e) {
+		for (let target of document.elementsFromPoint(e.clientX, e.clientY)) {
+			// console.log('CHECKING IF CAN DROP OVER ', target);
+
+			if ('myIsDroppable' in target && target.myIsDroppable(data))
+				return target;
+		}
+		// console.log('CANNOT DROP OVER ANYTHING');
+		return null;
+	}
+
+	let primed = false; // per-node
+	node.addEventListener('pointerdown', e => {
+		e.preventDefault();
+		primed = true;
+	});
+	node.addEventListener('pointermove', e => {
+		e.preventDefault();
+		if (primed && !dragging && e.buttons == 1) {
+			// console.log('DRAG START');
+			primed = false;
+			dragging = true;
+			node.setPointerCapture(e.pointerId);
+			handleFeedback(true);
+		}
+		if (dragging) {
+			// console.log('DRAGGING OVER ', document.elementsFromPoint(e.clientX, e.clientY));
+			let target = getDropTarget(e);
+			if (target !== lastDropTarget) {
+				if (lastDropTarget)
+					lastDropTarget.myHandleFeedback(false);
+				if (target)
+					target.myHandleFeedback(true);
+				lastDropTarget = target;
+			}
+		}
+	});
+	node.addEventListener('pointerup', e => {
+		e.preventDefault();
+		primed = false;
+		if (dragging) {
+			// console.log('DRAGGING END');
+			node.releasePointerCapture(e.pointerId);
+			e.stopImmediatePropagation();
+			if (lastDropTarget)
+				lastDropTarget.myHandleFeedback(false);
+			handleFeedback(false);
+			dragging = false;
+
+			// TODO: put it back
+
+			let target = getDropTarget(e);
+			if (target)
+				target.myHandleDropped(data);
+		}
+	});
+}
+
+function makeDropTarget(slotNode, isDroppable, handleDropped, handleFeedback) {
+	slotNode.myIsDroppable = isDroppable;
+	slotNode.myHandleDropped = handleDropped;
+	slotNode.myHandleFeedback = handleFeedback;
+}
+
+
 document.addEventListener('DOMContentLoaded', function() {
+	let dragged = null;
+
 	function addControl(type, slot, path, values, valueIDs) {
 		let slotID = 'slot-' + type + (slot !== null ? '-' + slot : '');
 		let slotNode = document.getElementById(slotID);
@@ -353,8 +431,8 @@ document.addEventListener('DOMContentLoaded', function() {
 			handleGameEdit();
 		}
 
-		slotNode.addEventListener('mousedown', function(event) {
-			if (event.button == 0) {
+		slotNode.addEventListener('click', function(event) {
+			if (!dragging && event.button == 0) {
 				cycleValue(currentGame, index => index + 1);
 				event.preventDefault();
 			}
@@ -368,6 +446,22 @@ document.addEventListener('DOMContentLoaded', function() {
 			event.preventDefault();
 		});
 
+		const bg = slotNode.querySelector('.bg');
+		makeDropTarget(
+			bg,
+			dragged => dragged.type === type && dragged.slot !== slot,
+			dragged => {
+				let v0 = getValue(currentGame);
+				let v1 = dragged.getValue(currentGame);
+
+				setValue(currentGame, v1);
+				dragged.setValue(currentGame, v0);
+
+				handleGameEdit();
+			},
+			isTarget => bg.classList.toggle('drop-target', isTarget),
+		);
+
 		showGameFuncs.push((game) => {
 			let value = getValue(game);
 			let valueIndex = values.indexOf(value);
@@ -379,9 +473,19 @@ document.addEventListener('DOMContentLoaded', function() {
 					valueID = type + '-' + valueID;
 
 					let valueNode = document.createElementNS("http://www.w3.org/2000/svg", 'use');
-					valueNode.setAttribute('class', 'value');
+					console.log('Created ', valueNode);
+					valueNode.classList.add('value');
 					valueNode.setAttributeNS("http://www.w3.org/1999/xlink", 'href', '#' + valueID);
 					slotNode.appendChild(valueNode);
+
+					makeDraggable(
+						valueNode,
+						{type, slot, getValue, setValue},
+						isDragged => {
+							valueNode.classList.toggle('dragged', isDragged);
+							console.log(isDragged, valueNode);
+						},
+					);
 				}
 			}
 		});

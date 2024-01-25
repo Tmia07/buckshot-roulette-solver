@@ -36,6 +36,7 @@
 					<p>Input the game you want to get a solution for by clicking/tapping on the slots.</p>
 					<p>You can also use the mouse wheel to quickly cycle through options.</p>
 					<p>Right click / long tap a slot to clear it.</p>
+					<p>Drag items to swap their location.</p>
 					<p>Click the stock to change whose turn it is.</p>
 				</li>
 				<li>
