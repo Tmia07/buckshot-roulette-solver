@@ -299,21 +299,29 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 
 	if (state0.totalShells == 0)
 	{
+		// Handcuffs come off. How will you grab the items otherwise?
+		foreach (Character character, handcuffState; state0.handcuffs)
+			if (handcuffState)
+			{
+				State state1 = state0;
+				state1.handcuffs[character] = HandcuffState.none;
+				driver.log(() => "The round is ending; " ~ (character == Character.player ? "your" : "the dealer's") ~ " handcuffs come off.");
+				return driver.recurse(state1);
+			}
+
+		// It's always the player's turn first.
+		if (state0.currentTurn != Character.player)
+		{
+			State state1 = state0;
+			state1.currentTurn = Character.player;
+			driver.log(() => "The round is ending; the dealer's turn ends.");
+			return driver.recurse(state1);
+		}
+
 		// End of round.
 		driver.log(() => "Starting new round.");
 
 		State state1 = state0;
-
-		// It's always the player's turn first.
-		state1.currentTurn = Character.player;
-
-		// Handcuffs come off. How will you grab the items otherwise?
-		foreach (Character character, ref handcuffState; state1.handcuffs)
-			if (handcuffState)
-			{
-				driver.log(() => (character == Character.player ? "Your" : "The dealer's") ~ " handcuffs come off.");
-				handcuffState = HandcuffState.none;
-			}
 
 		// Use a different flow depending on if the driver is interactive.
 		// If yes, use a series of questions suitable for interactive use (humans).
