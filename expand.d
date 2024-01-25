@@ -745,6 +745,9 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 								Move.shootSelf, Move.useHandSaw,
 							);
 
+						if (state1.shotgunSawedOff)
+							dealerTarget = Character.player;
+
 						if (dealerTarget.isNull)
 							return coinFlip!Move(
 								move => tryMove(state1, move),
