@@ -485,6 +485,12 @@ void main(string[] args)
 		stdout.writeln(analysis.toJson);
 		return;
 	}
+	catch (Exception e)
+	{
+		struct ErrorReply { string error; }
+		stdout.writeln(ErrorReply(e.msg).toJson);
+		return;
+	}
 
 	// auto scores = new RemoteScores(problem.opponent);
 	// Analysis analysis;
