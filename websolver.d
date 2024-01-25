@@ -21,6 +21,7 @@ import game;
 import expand;
 import graph;
 import packing;
+import remotegraph;
 
 mixin SSLUseLib;
 
@@ -453,14 +454,8 @@ struct Driver(Scores)
 	}
 }
 
-void main(string[] args)
+JSAnalysis analyze(Scores)(JSProblem problem, Scores scores)
 {
-	enforce(args.length == 2, "Bad usage");
-	auto problem = args[1].jsonParse!JSProblem;
-
-	auto scoreData = mapFile(scoreFileName(problem.opponent), MmMode.read);
-	auto scores = scoreData.asDataOf!PackedScore.unsafeContents;
-
 	JSAnalysis analysis;
 	try
 	{
@@ -479,7 +474,7 @@ void main(string[] args)
 			game = problem.game.get().toGame();
 		analysis.packedGame = game.packGame().to!string;
 
-		Driver!ScoreTable driver;
+		Driver!Scores driver;
 		driver.problem = &problem;
 		driver.scores = scores;
 		driver.analysis = &analysis;
@@ -488,10 +483,36 @@ void main(string[] args)
 		driver.run(game);
 	}
 	catch (JSGameError e)
-	{
 		analysis.validationError = JSAnalysis.ValidationError(e.msg, e.badIDs);
-		stdout.writeln(analysis.toJson);
-		return;
+	return analysis;
+}
+
+void main(string[] args)
+{
+	bool local = true;
+
+	try
+	{
+		enforce(args.length == 2, "Bad usage");
+		auto problem = args[1].jsonParse!JSProblem;
+
+		JSAnalysis analysis;
+		if (local)
+		{
+			auto scoreData = mapFile(scoreFileName(problem.opponent), MmMode.read);
+			auto scores = scoreData.asDataOf!PackedScore.unsafeContents;
+
+			analysis = analyze(problem, scores);
+		}
+		else
+		{
+			auto scores = new RemoteScores(problem.opponent);
+			do
+				analysis = analyze(problem, scores);
+			while (!scores.resolve());
+		}
+
+		stdout.writeln(analysis.toJson.replace("nan", "null"));
 	}
 	catch (Exception e)
 	{
@@ -499,12 +520,4 @@ void main(string[] args)
 		stdout.writeln(ErrorReply(e.msg).toJson);
 		return;
 	}
-
-	// auto scores = new RemoteScores(problem.opponent);
-	// Analysis analysis;
-	// do
-	// 	analysis = analyzeGame(problem.initialGame, problem.rolledDie, scores, problem.opponent);
-	// while (!scores.resolve());
-
-	stdout.writeln(analysis.toJson.replace("nan", "null"));
 }
