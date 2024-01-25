@@ -70,6 +70,9 @@ enum ChoiceMode
 	/// For calculating the win chance, we treat this
 	/// in the same way as "worst", to be safe.
 	unknown,
+	/// Something that's usually always decided in some way,
+	/// but overridable in interactive mode.
+	first,
 }
 
 enum Opponent
@@ -333,6 +336,7 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 			enum Phase
 			{
 				playerItems,
+				charges,
 				shells,
 				dealerItems,
 				end,
@@ -480,6 +484,24 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 								? "Nothing (no " ~ (itemsSoFar == 0 ? "" : "more ") ~ "items)"
 								: capitalize(itemDescriptions[item.get()]),
 							itemChoices[0 .. numItemChoices],
+						);
+
+					// Note, this could also be done by making 0 HP representable...
+					case Phase.charges:
+						return driver.choice!ubyte(
+							ChoiceMode.first,
+							() => "Reset charges?",
+							(charges) {
+								AskState state3 = state2;
+								if (charges)
+								{
+									state3.health[] = charges;
+									driver.log(() => "Both characters now have " ~ charges.to!string ~ " charges.");
+								}
+								return nextPhase(state3);
+							},
+							charges => charges ? "Yes, " ~ charges.to!string ~ " charges" : "No",
+							0, 2, 3, 4
 						);
 
 					case Phase.shells:
@@ -895,6 +917,9 @@ template graphChoice(alias GetScore)
 				}
 				assert(worstScore != Score.max, "All choices are invalid");
 				return worstScore;
+
+			case ChoiceMode.first:
+				return getScore(items[0]);
 		}
 	}
 }

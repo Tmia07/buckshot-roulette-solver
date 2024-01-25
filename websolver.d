@@ -408,6 +408,11 @@ struct Driver(Scores)
 						}
 					assert(worstScore != Score.max, "All choices are invalid");
 					return worstScore;
+
+				case ChoiceMode.first:
+					assert(options[0].itemIndex == 0);
+					selectedOptionIndex = 0;
+					return options[0].score;
 			}
 		}();
 		event.choice.score = score;

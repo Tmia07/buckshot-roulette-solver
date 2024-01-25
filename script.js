@@ -139,6 +139,7 @@ function addAnalysis(problem, data) {
 				event.choice.mode == 'random' ? '🎲' :
 				event.choice.mode == 'randomWithDuplicates' ? '🎲' :
 				event.choice.mode == 'unknown' ? '❓' :
+				event.choice.mode == 'first' ? '❓' :
 				'';
 			addEvent(icon,
 					 event.choice.description,
