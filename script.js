@@ -291,7 +291,7 @@ function deserialize(hash) {
 	else
 		result.opponent = 'game';
 	if (parts.length > 2)
-		result.decisions = parts[2].split(',').map(parseInt);
+		result.decisions = parts[2].split(',').map(n => parseInt(n));
 	return result;
 }
 
