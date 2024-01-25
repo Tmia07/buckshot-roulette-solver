@@ -46,13 +46,11 @@ struct JSGame
 
 	/// Convert `Game` to `JSGame`, trying to not move
 	/// things around too much (compared to `reference`).
-	this(Game game, JSGame reference)
+	this(const Game game, JSGame reference)
 	{
 		this = reference;
 
 		this.nextShell = game.nextShell;
-		if (!game.nextShell.isNull)
-			game.shells[game.nextShell.get()]++; // Encode that one, too
 		foreach (shellType; ShellType.init .. enumLength!ShellType)
 			while (this.toGame(false).shells[shellType] > game.shells[shellType])
 				this.shells[this.shells[].lastIndexOf(shellType.nullable)] = Nullable!ShellType.init;
@@ -78,7 +76,7 @@ struct JSGame
 			if (game.handcuffs[character] == HandcuffState.none)
 				this.handcuffs[character] = Nullable!HandcuffState.init;
 			else
-				this.handcuffs[character] = game.handcuffs[character].nullable;
+				this.handcuffs[character] = game.handcuffs[character].HandcuffState.nullable;
 
 		this.shotgunSawedOff = game.shotgunSawedOff;
 
@@ -94,14 +92,6 @@ struct JSGame
 		foreach (shell; this.shells)
 			if (!shell.isNull)
 				game.shells[shell.get()]++;
-		foreach (shellType; ShellType.init .. enumLength!ShellType)
-			if (strict && game.shells[shellType] > maxShells / 2)
-				throw new JSGameError("Cannot have that many shells of one type.",
-					maxShells.iota
-					.filter!(shellIndex => this.shells[shellIndex] == shellType.nullable)
-					.map!(shellIndex => "shell-" ~ text(shellIndex))
-					.array
-				);
 		game.nextShell = this.nextShell;
 		if (!this.nextShell.isNull)
 		{
@@ -115,6 +105,14 @@ struct JSGame
 				);
 			game.shells[shellType]--;
 		}
+		foreach (shellType; ShellType.init .. enumLength!ShellType)
+			if (strict && game.shells[shellType] > maxShells / 2)
+				throw new JSGameError("Cannot have that many shells of one type.",
+					maxShells.iota
+					.filter!(shellIndex => this.shells[shellIndex] == shellType.nullable)
+					.map!(shellIndex => "shell-" ~ text(shellIndex))
+					.array
+				);
 		foreach (character; Character.init .. enumLength!Character)
 		{
 			foreach (item; this.items[character])
