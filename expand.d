@@ -18,7 +18,7 @@ enum Move : ubyte
 {
 	shootSelf,
 	shootOther,
-	useLookingGlass,
+	useMagnifyingGlass,
 	useHandcuffs,
 	useBeer,
 	useCigarettePack,
@@ -26,7 +26,7 @@ enum Move : ubyte
 }
 
 string[enumLength!Item] itemDescriptions = [
-	"a Looking Glass",
+	"a Magnifying Glass",
 	"Handcuffs",
 	"a Beer",
 	"a Cigarette Pack",
@@ -39,7 +39,7 @@ string getMoveDescription(Move move, Character who)
 	{
 		case Move.shootSelf       : return who == Character.player ? "Shoot yourself"   : "Shoot themselves";
 		case Move.shootOther      : return who == Character.player ? "Shoot the dealer" : "Shoot you";
-		case Move.useLookingGlass : return "Use a Looking Glass";
+		case Move.useMagnifyingGlass : return "Use a Magnifying Glass";
 		case Move.useHandcuffs    : return "Use Handcuffs";
 		case Move.useBeer         : return "Use a Beer";
 		case Move.useCigarettePack: return "Use a Cigarette Pack";
@@ -246,7 +246,7 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 				state1.handcuffs[state1.currentTurn.other] = HandcuffState.willSkip;
 				driver.log(() => (state1.currentTurn.other == Character.player ? "You are" : "The dealer is") ~ " now handcuffed.");
 				return driver.recurse(state1);
-			case Item.lookingGlass:
+			case Item.magnifyingGlass:
 				if (!state1.nextShell.isNull)
 					return Score.nan;
 				return resolveRound(state1, (ShellType shellType, ref State state2) {
@@ -287,7 +287,7 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 		{
 			case Move.shootSelf : return shoot(state, state.currentTurn);
 			case Move.shootOther: return shoot(state, state.currentTurn.other);
-			case Move.useLookingGlass: return use(state, Item.lookingGlass);
+			case Move.useMagnifyingGlass: return use(state, Item.magnifyingGlass);
 			case Move.useHandcuffs: return use(state, Item.handcuffs);
 			case Move.useBeer: return use(state, Item.beer);
 			case Move.useCigarettePack: return use(state, Item.cigarettePack);
@@ -697,8 +697,8 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 						// (order that items were acquired).
 						// To be safe, assume an order which is most inconvenient for us.
 						Move[enumLength!Item] itemOptions; size_t numItemOptions;
-						if (state1.items[state1.currentTurn][Item.lookingGlass] && !dealerKnowsShell && state1.totalShells != 1)
-							itemOptions[numItemOptions++] = Move.useLookingGlass;
+						if (state1.items[state1.currentTurn][Item.magnifyingGlass] && !dealerKnowsShell && state1.totalShells != 1)
+							itemOptions[numItemOptions++] = Move.useMagnifyingGlass;
 						if (state1.items[state1.currentTurn][Item.cigarettePack] && dealerCanHeal)
 							itemOptions[numItemOptions++] = Move.useCigarettePack;
 						if (state1.items[state1.currentTurn][Item.beer] && knownShell != ShellType.live.nullable && state1.totalShells != 1)

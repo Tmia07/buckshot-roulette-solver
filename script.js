@@ -505,8 +505,8 @@ document.addEventListener('DOMContentLoaded', function() {
 	for (let c = 0; c < defaultGame.items.length; c++)
 		for (let i = 0; i < defaultGame.items[c].length; i++)
 			addControl('item', c + '-' + i, ['items', c, i],
-					   [null, 'lookingGlass', 'handcuffs', 'beer', 'cigarettePack', 'handSaw'],
-					   [null, 'lookingGlass', 'handcuffs', 'beer', 'cigarettePack', 'handSaw']);
+					   [null, 'magnifyingGlass', 'handcuffs', 'beer', 'cigarettePack', 'handSaw'],
+					   [null, 'magnifyingGlass', 'handcuffs', 'beer', 'cigarettePack', 'handSaw']);
 	for (let c = 0; c < defaultGame.health.length; c++)
 		addControl('health', c, ['health', c], [4, 3, 2, 1], ['4', '3', '2', '1']);
 	for (let c = 0; c < defaultGame.handcuffs.length; c++)

@@ -19,7 +19,7 @@ enum ShellType : ubyte
 
 enum Item : ubyte
 {
-	lookingGlass,
+	magnifyingGlass,
 	handcuffs,
 	beer,
 	cigarettePack,
