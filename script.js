@@ -100,6 +100,7 @@ function addAnalysis(problem, data) {
 		const link = node('A', {href: '#' + o.packedGame + '/' + problem.opponent}, 'Game #' + o.packedGame);
 		link.addEventListener('click', function(e) {
 			e.preventDefault();
+			document.getElementById('explorer-page').scrollTo({ top: 0, behavior: 'smooth' });
 
 			currentGame = copyGame(o.game);
 			handleGameEdit(true);
