@@ -28,6 +28,7 @@
 	</div>
 	<div id="help-page">
 		<div>
+			<h3>Buckshot Roulette solver</h1>
 			<p>Usage:</p>
 
 			<ol>
@@ -35,6 +36,7 @@
 					<p>Input the game you want to get a solution for by clicking/tapping on the slots.</p>
 					<p>You can also use the mouse wheel to quickly cycle through options.</p>
 					<p>Right click / long tap a slot to clear it.</p>
+					<p>Click the stock to change whose turn it is.</p>
 				</li>
 				<li>
 					<p>The summary on the top right will give you a simple explanation of the situation.</p>
@@ -43,16 +45,33 @@
 					<p>The outcome explorer on the right will display an analysis of the game.</p>
 
 					<p>
-						The <b>Win %</b> column will show the likelihood of the game ending with you winning:
+						The <b>Win %</b> column will show the likelihood of the game ending with you winning,
+						assuming perfect play on your behalf (i.e. using this solver for all decisions).
 						100% means that a win is guaranteed, and 0% means that a loss is guaranteed.
 					</p>
 
 					<p>
+						The explorer simulates the game, playing forward starting from the entered game, based on the selected and implied decisions and outcomes.
 						For decisions and random events, the analysis will show how each outcome affects the <b>Win %</b>.
 						You can select or change which outcome happens by selecting the corresponding option.
 					</p>
+
+					<p>
+						Checkpoints are game states that can be loaded into the game editor.
+						Clink the "Game #" link to do so.
+					</p>
 				</li>
 			</ol>
+
+			<p>You can change the simulated opponent at the top.</p>
+			<ul>
+				<li><b>Game Dealer AI</b> is the AI that the game uses.</li>
+				<li>
+					<b>Perfect opponent</b> is a hypothetical opponent who plays perfectly,
+					and makes decisions which are most likely to lead them to win.
+					However, you can override the opponent's decisions in the explorer.
+				</li>
+			</ul>
 
 			<p>Click <span class="emoji">🧹</span> to reset the board to a new game. You can use your web browser back and forward buttons to undo / redo.</p>
 

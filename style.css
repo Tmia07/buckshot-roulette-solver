@@ -124,3 +124,9 @@ input[type="radio"] {
 	overflow: auto;
 }
 .emoji { font-family: "Noto Color Emoji"; }
+
+ul, ol {
+	/* default is 40px which is not responsive: */
+	padding-inline-start: 2em;
+}
+h3 { text-align: center; }
