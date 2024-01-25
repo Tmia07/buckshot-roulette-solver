@@ -337,12 +337,23 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 				dealerItems,
 				end,
 			}
+			enum maxGrantedItems = 4;
 			static struct AskState
 			{
 				State state;
 				alias state this;
 
 				Phase phase;
+
+				// The player gets between 0 and 4 items.  The dealer gets the same amount.
+				// We want to ask questions in the order that the game asks them...
+				// but it gets complicated because:
+				// 1. The item number distribution should be linear,
+				//    but the number of granted items can't be known until the end
+				// 2. Characters can run out of inventory space
+				//    (so the total number of items may not even be knowable...)
+				// These track the lower and upper bound (inclusive):
+				size_t numItemsLow = 0, numItemsHigh = maxGrantedItems;
 				size_t[enumLength!Character] itemIndex;
 			}
 
@@ -363,31 +374,64 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 						auto character = state2.phase == Phase.playerItems ? Character.player : Character.dealer;
 						auto itemsSoFar = state2.itemIndex[character];
 
-						enum maxGrantedItems = 4;
-
-						// The player gets between 0 and 4 items.  The dealer always gets the same amount.
-						auto minItems = character == Character.player ? 0 : state2.itemIndex[Character.player];
-						auto maxItems = character == Character.player ? 4 : state2.itemIndex[Character.player];
-
-						if (itemsSoFar == maxItems)
+						if (itemsSoFar == state2.numItemsHigh)
 							return nextPhase(state2);
-
-						enum maxItemChoices = (enumLength!Item + 1) * (maxGrantedItems + 1);
-						Nullable!Item[maxItemChoices] itemChoices; size_t numItemChoices;
 
 						// Some slightly hairy math, in order to fairly represent the linear
 						// distribution of number of granted items without asking additional questions:
 						size_t noItemChanceNumerator, noItemChanceDenominator;
-						if (itemsSoFar < minItems)
+						if (itemsSoFar < state2.numItemsLow)
 						{
+							// We *know* an item will be granted.
 							noItemChanceNumerator = 0;
 							noItemChanceDenominator = 1;
 						}
 						else
 						{
 							noItemChanceNumerator = 1;
-							noItemChanceDenominator = (maxItems - minItems + 1) - (itemsSoFar - minItems);
+							noItemChanceDenominator = maxGrantedItems + 1 - itemsSoFar;
 						}
+
+						if (state2.totalItems(character) == maxItems)
+						{
+							if (character == Character.player)
+							{
+								// Same as below, except "false" instead of null and "true" except non-null.
+								bool[maxGrantedItems + 1] itemChoices; size_t numItemChoices;
+
+								foreach (i; 0 .. noItemChanceDenominator)
+									itemChoices[numItemChoices++] = !(i < noItemChanceNumerator);
+
+								return driver.choice!bool(
+									ChoiceMode.randomWithDuplicates,
+									() => "No more room, but did " ~ (character == Character.player ? "you" : "the dealer") ~ " get " ~ ["an", "a second", "a third", "a fourth"][itemsSoFar] ~ " item?",
+									(gotItem) {
+										AskState state3 = state2;
+										if (!gotItem)
+										{
+											if (state3.numItemsHigh > itemsSoFar)
+												state3.numItemsHigh = itemsSoFar;
+										}
+										else
+										{
+											if (state3.numItemsLow < itemsSoFar + 1)
+												state3.numItemsLow = itemsSoFar + 1;
+										}
+										return nextPhase(state3);
+									},
+									(gotItem) => gotItem ? "Yes" : "No",
+									itemChoices[0 .. numItemChoices],
+								);
+							}
+							else
+							{
+								// I guess we'll never know.
+								return nextPhase(state2);
+							}
+						}
+
+						enum maxItemChoices = (enumLength!Item + 1) * (maxGrantedItems + 1);
+						Nullable!Item[maxItemChoices] itemChoices; size_t numItemChoices;
 
 						foreach (item; Item.init .. enumLength!Item)
 						{
@@ -414,13 +458,19 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 
 						return driver.choice!(Nullable!Item)(
 							ChoiceMode.randomWithDuplicates,
-							() => "What is the" ~ (maxItems == 1 ? "" : [" first", " second", " third", " fourth"][state2.itemIndex[character]]) ~ " item that " ~ (character == Character.player ? "you get" : "the dealer gets") ~ "?",
+							() => "What is the" ~ (state2.numItemsHigh == 1 ? "" : [" first", " second", " third", " fourth"][itemsSoFar]) ~ " item that " ~ (character == Character.player ? "you get" : "the dealer gets") ~ "?",
 							(item) {
+								AskState state3 = state2;
 								if (item.isNull)
-									return nextPhase(state2);
+								{
+									if (state3.numItemsHigh > itemsSoFar)
+										state3.numItemsHigh = itemsSoFar;
+									return nextPhase(state3);
+								}
 								else
 								{
-									AskState state3 = state2;
+									if (state3.numItemsLow < itemsSoFar + 1)
+										state3.numItemsLow = itemsSoFar + 1;
 									state3.items[character][item.get()]++;
 									state3.itemIndex[character]++;
 									return ask(state3);
