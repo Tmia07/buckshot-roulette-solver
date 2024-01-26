@@ -34,8 +34,8 @@
 			<ol>
 				<li>
 					<p>Input the game you want to get a solution for by clicking/tapping on the slots.</p>
-					<p>You can also use the mouse wheel to quickly cycle through options.</p>
 					<p>Right click / long tap a slot to clear it.</p>
+					<p>You can also use the mouse wheel to quickly cycle through options.</p>
 					<p>Drag items to swap their location.</p>
 					<p>Click the stock to change whose turn it is.</p>
 				</li>
@@ -48,7 +48,7 @@
 					<p>
 						The <b>Win %</b> column will show the likelihood of the game ending with you winning,
 						assuming perfect play on your behalf (i.e. using this solver for all decisions).
-						100% means that a win is guaranteed, and 0% means that a loss is guaranteed.
+						100% means that a win is guaranteed, and 0% means that a loss is inevitable.
 					</p>
 
 					<p>
@@ -59,12 +59,12 @@
 
 					<p>
 						Checkpoints are game states that can be loaded into the game editor.
-						Clink the "Game #" link to do so.
+						Click the "Game #" link to do so.
 					</p>
 				</li>
 			</ol>
 
-			<p>You can change the simulated opponent at the top.</p>
+			<p>You can change the simulated opponent at the top:</p>
 			<ul>
 				<li><b>Game Dealer AI</b> is the AI that the game uses.</li>
 				<li>
@@ -74,7 +74,7 @@
 				</li>
 			</ul>
 
-			<p>Click <span class="emoji">🧹</span> to reset the board to a new game. You can use your web browser back and forward buttons to undo / redo.</p>
+			<p>Click <span class="emoji">🧹</span> to reset the board to a new game. You can use your web browser's back and forward buttons to undo / redo.</p>
 
 			<p>Click <span class="emoji">🔄</span> to flip the board around, if you want to examine your opponent's options.</p>
 
