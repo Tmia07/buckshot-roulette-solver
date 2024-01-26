@@ -15,6 +15,15 @@
 
     .dragged { fill-opacity: 0.5; cursor: grabbing; }
     .drop-target { fill: #afa; }
+
+    @keyframes help-nag {
+      0% { stroke: black; }
+      50% { stroke: blue; }
+      100% { stroke: black; }
+    }
+    .help-nag #button-help rect {
+      animation: linear help-nag 1s infinite;
+    }
   </style>
 
   <defs>

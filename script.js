@@ -475,7 +475,6 @@ document.addEventListener('DOMContentLoaded', function() {
 					valueID = type + '-' + valueID;
 
 					let valueNode = document.createElementNS("http://www.w3.org/2000/svg", 'use');
-					console.log('Created ', valueNode);
 					valueNode.classList.add('value');
 					valueNode.setAttributeNS("http://www.w3.org/1999/xlink", 'href', '#' + valueID);
 					slotNode.appendChild(valueNode);
@@ -581,5 +580,9 @@ document.addEventListener('DOMContentLoaded', function() {
 		helpVisible = !helpVisible;
 		document.body.classList.toggle('help-visible', helpVisible);
 		document.querySelector('#button-help text').textContent = helpVisible ? '❌' : 'ℹ️';
+		document.getElementById('board').classList.remove('help-nag');
+		window.localStorage.setItem('seen-help', '');
 	});
+	if (window.localStorage.getItem('seen-help') === null)
+		document.getElementById('board').classList.add('help-nag');
 });
