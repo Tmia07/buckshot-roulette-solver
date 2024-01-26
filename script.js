@@ -383,9 +383,9 @@ function makeDraggable(node, data, handleFeedback) {
 			if (lastDropTarget)
 				lastDropTarget.myHandleFeedback(false);
 			handleFeedback(false);
-			dragging = false;
-
-			// TODO: put it back
+			setTimeout(() => {
+				dragging = false;
+			}, 0);
 
 			let target = getDropTarget(e);
 			if (target)
@@ -484,7 +484,7 @@ document.addEventListener('DOMContentLoaded', function() {
 						{type, slot, getValue, setValue},
 						isDragged => {
 							valueNode.classList.toggle('dragged', isDragged);
-							console.log(isDragged, valueNode);
+							// console.log(isDragged, valueNode);
 						},
 					);
 				}
