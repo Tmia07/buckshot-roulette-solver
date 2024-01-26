@@ -241,14 +241,17 @@ function queryProblem(problem, delay, noSave) {
 
 		document.body.classList.toggle('loading', true);
 
-		fetch('websolver.php', {
+		const url = window.location.hostname == 'cy.md'
+			  ? 'https://home.cy.md/jsonapi/backshot-roulette-solver'
+			  : 'websolver.php';
+		fetch(url, {
 			method: 'POST',
 			headers: {
 				'Content-Type': 'application/json',
 			},
 			body: JSON.stringify(problem),
 		})
-		.then((response) => response.json())
+		.then((response) => response.ok ? response.json() : { error: "HTTP " + response.status })
 		.then((data) => {
 			if (requestVersion != stateVersion)
 				return; // outdated
