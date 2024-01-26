@@ -1,6 +1,17 @@
 <?php
+
+$descriptor_spec = [
+    0 => ['pipe', 'r'],
+    1 => ['pipe', 'w'],
+];
+
+$process = proc_open(array('./websolver'), $descriptor_spec, $pipes);
+
 header('Content-Type: application/json');
-passthru('./websolver ' . escapeshellarg(file_get_contents('php://input')), $result_code);
-if ($result_code != 0) {
-    echo '{"error":' . $result_code . '}';
+if (is_resource($process)) {
+    stream_copy_to_stream(fopen('php://input' , 'r'), $pipes[0]); fclose($pipes[0]);
+    stream_copy_to_stream($pipes[1], fopen('php://output', 'w')); fclose($pipes[1]);
+    proc_close($process);
+} else {
+    echo '{"error":"Failed to create process."}';
 }

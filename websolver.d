@@ -14,6 +14,7 @@ import std.typecons;
 
 import ae.net.ssl.openssl;
 import ae.sys.datamm;
+import ae.sys.file;
 import ae.utils.array;
 import ae.utils.json;
 import ae.utils.meta;
@@ -510,8 +511,8 @@ void main(string[] args)
 
 	try
 	{
-		enforce(args.length == 2, "Bad usage");
-		auto problem = args[1].jsonParse!JSProblem;
+		enforce(args.length == 1, "Bad usage");
+		auto problem = readFile(stdin).assumeUTF.jsonParse!JSProblem;
 
 		JSAnalysis analysis;
 		if (local)
