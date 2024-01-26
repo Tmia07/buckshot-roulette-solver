@@ -117,6 +117,8 @@ input[type="radio"] {
 	background-color: white;
 	border: 0.21em solid black;
 	padding: 1em 2em;
+	font-size: 75%;
+	text-align: justify;
 
 	/* margin: 1em; */
 	position: absolute;
