@@ -584,8 +584,8 @@ document.addEventListener('DOMContentLoaded', function() {
 		document.body.classList.toggle('help-visible', helpVisible);
 		document.querySelector('#button-help text').textContent = helpVisible ? '❌' : 'ℹ️';
 		document.getElementById('board').classList.remove('help-nag');
-		window.localStorage.setItem('seen-help', '');
+		window.localStorage.setItem('buckshot-roulette-seen-help', '');
 	});
-	if (window.localStorage.getItem('seen-help') === null)
+	if (window.localStorage.getItem('buckshot-roulette-seen-help') === null)
 		document.getElementById('board').classList.add('help-nag');
 });
