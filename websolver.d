@@ -7,6 +7,7 @@ import std.exception;
 import std.file;
 import std.math.algebraic;
 import std.math.traits;
+import std.path;
 import std.range;
 import std.stdio;
 import std.string;
@@ -517,6 +518,7 @@ void main(string[] args)
 		JSAnalysis analysis;
 		if (local)
 		{
+			chdir(args[0].realPath().dirName());
 			auto scoreData = mapFile(scoreFileName(problem.opponent), MmMode.read);
 			auto scores = scoreData.asDataOf!PackedScore.unsafeContents;
 
