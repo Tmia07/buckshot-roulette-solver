@@ -83,6 +83,7 @@
 			<p>Links:</p>
 			<ul>
 				<li><a href="https://gist.github.com/CyberShadow/87d403bb29fa3047f2182c41f74e286e">Source code</a></li>
+				<li><a href="https://itch.io/post/9255122">itch.io thread</a></li>
 			</ul>
 		</div>
 	</div>
