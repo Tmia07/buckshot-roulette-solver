@@ -5,6 +5,7 @@ import std.algorithm.searching;
 import std.conv;
 import std.exception;
 import std.file;
+import std.math.algebraic;
 import std.math.traits;
 import std.range;
 import std.stdio;
@@ -16,6 +17,7 @@ import ae.sys.datamm;
 import ae.utils.array;
 import ae.utils.json;
 import ae.utils.meta;
+import ae.utils.text;
 
 import game;
 import expand;
@@ -244,6 +246,8 @@ struct Driver(Scores)
 
 	Score run(const ref Game game)
 	{
+		auto packedGame = game.packGame();
+		auto graphScore = scores[packedGame].unpackScore;
 		assert(interactive);
 
 		JSAnalysis.Event event;
@@ -253,13 +257,18 @@ struct Driver(Scores)
 		auto score = expand.expand(game, &this, problem.opponent);
 		analysis.events[eventIndex].start = score;
 
+		if (abs(score.packScore.value - graphScore.packScore.value) > 0)
+			stderr.writeln("Warning: Game #", packedGame, " recursed ", fpToString(score), " != graph ", fpToString(graphScore));
+
 		return score;
 	}
 
 	Score recurse(const ref Game game)
 	{
+		auto packedGame = game.packGame();
+		auto graphScore = scores[packedGame].unpackScore;
 		if (!interactive)
-			return scores[game.packGame()].unpackScore;
+			return graphScore;
 
 		auto jsGame = JSGame(game, recursedGames[$-1]);
 		recursedGames ~= jsGame;
@@ -272,6 +281,9 @@ struct Driver(Scores)
 
 		auto score = expand.expand(game, &this, problem.opponent);
 		analysis.events[eventIndex].recursion.score = score;
+
+		if (abs(score.packScore.value - graphScore.packScore.value) > 0)
+			stderr.writeln("Warning: Game #", packedGame, " recursed ", fpToString(score), " != graph ", fpToString(graphScore));
 
 		return score;
 	}
