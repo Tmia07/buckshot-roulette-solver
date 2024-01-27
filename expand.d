@@ -58,9 +58,11 @@ enum ChoiceMode
 	/// Something the game would choose at random.
 	/// All odds are equal.
 	random,
-	/// Same as "random", but the items can contain duplicates,
-	/// to represent a biased choice.
-	randomWithDuplicates,
+	/// Same as "random", but each item must be a struct with
+	/// a "weight" field, which reflects its relative weight.
+	/// A weight of 0 is allowed, which means that it is only
+	/// relevant if chosen manually by the user in the explorer.
+	randomWeighted,
 	/// Something the player decides,
 	/// so we should pick the best option for the player.
 	best,
@@ -73,6 +75,13 @@ enum ChoiceMode
 	/// Something that's usually always decided in some way,
 	/// but overridable in interactive mode.
 	first,
+}
+
+/// Helper type constructor for randomWeighted.
+struct Weighted(T, Weight = size_t)
+{
+	T value;
+	Weight weight = 0;
 }
 
 enum Opponent
@@ -166,21 +175,21 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 			return handler(shellType, newState);
 		}
 
-		ShellType[maxShells] shells;
-		size_t numShells;
+		Weighted!ShellType[enumLength!ShellType] options;
 		foreach (shellType; ShellType.init .. enumLength!ShellType)
-			foreach (i; 0 .. state.shells[shellType])
-				shells[numShells++] = shellType;
+			options[shellType] = Weighted!ShellType(shellType, state.shells[shellType]);
 
-		return driver.choice!(ChoiceMode.randomWithDuplicates, ShellType)(
+		return driver.choice!(ChoiceMode.randomWeighted, Weighted!ShellType)(
 			() => "What shell was in the chamber?",
 			(shellType) {
+				if (!shellType.weight)
+					return Score.nan;
 				State newState = state;
-				newState.shells[shellType]--;
-				return handler(shellType, newState);
+				newState.shells[shellType.value]--;
+				return handler(shellType.value, newState);
 			},
-			shellType => ["Blank", "Live"][shellType],
-			shells[0 .. numShells]
+			shellType => ["Blank", "Live"][shellType.value],
+			options
 		);
 	}
 
@@ -393,22 +402,26 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 							noItemChanceNumerator = 1;
 							noItemChanceDenominator = maxGrantedItems + 1 - itemsSoFar;
 						}
+						auto itemNotGrantedWeight =                           noItemChanceNumerator;
+						auto itemGrantedWeight    = noItemChanceDenominator - noItemChanceNumerator;
 
 						if (state2.totalItems(character) == maxItems)
 						{
 							if (character == Character.player)
 							{
-								// Same as below, except "false" instead of null and "true" except non-null.
-								bool[maxGrantedItems + 1] itemChoices; size_t numItemChoices;
+								// Same as below, except "false" instead of null and "true" instead of non-null.
+								Weighted!bool[2] options = [
+									{ false, itemNotGrantedWeight },
+									{ true , itemGrantedWeight    },
+								];
 
-								foreach (i; 0 .. noItemChanceDenominator)
-									itemChoices[numItemChoices++] = !(i < noItemChanceNumerator);
-
-								return driver.choice!(ChoiceMode.randomWithDuplicates, bool)(
+								return driver.choice!(ChoiceMode.randomWeighted, Weighted!bool)(
 									() => "No more room, but did " ~ (character == Character.player ? "you" : "the dealer") ~ " get " ~ ["an", "a second", "a third", "a fourth"][itemsSoFar] ~ " item?",
 									(gotItem) {
+										if (!gotItem.weight)
+											return Score.nan;
 										AskState state3 = state2;
-										if (!gotItem)
+										if (!gotItem.value)
 										{
 											if (state3.numItemsHigh > itemsSoFar)
 												state3.numItemsHigh = itemsSoFar;
@@ -420,8 +433,8 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 										}
 										return nextPhase(state3);
 									},
-									(gotItem) => gotItem ? "Yes" : "No",
-									itemChoices[0 .. numItemChoices],
+									(gotItem) => gotItem.value ? "Yes" : "No",
+									options[],
 								);
 							}
 							else
@@ -431,8 +444,11 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 							}
 						}
 
-						enum maxItemChoices = (enumLength!Item + 1) * (maxGrantedItems + 1);
-						Nullable!Item[maxItemChoices] itemChoices; size_t numItemChoices;
+						Weighted!(Nullable!Item)[enumLength!Item + 1] options;
+
+						foreach (item; Item.init .. enumLength!Item)
+							options[item].value = item.nullable;
+						options[enumLength!Item].value = Nullable!Item.init;
 
 						foreach (item; Item.init .. enumLength!Item)
 						{
@@ -448,20 +464,17 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 							if (!canAdd)
 								continue;
 
-							foreach (i; 0 .. noItemChanceDenominator)
-							{
-								if (i < noItemChanceNumerator)
-									itemChoices[numItemChoices++] = Nullable!Item.init;
-								else
-									itemChoices[numItemChoices++] = item;
-							}
+							options[item           ].weight += itemGrantedWeight;
+							options[enumLength!Item].weight += itemNotGrantedWeight;
 						}
 
-						return driver.choice!(ChoiceMode.randomWithDuplicates, Nullable!Item)(
+						return driver.choice!(ChoiceMode.randomWeighted, Weighted!(Nullable!Item))(
 							() => "What is the" ~ (state2.numItemsHigh == 1 ? "" : [" first", " second", " third", " fourth"][itemsSoFar]) ~ " item that " ~ (character == Character.player ? "you get" : "the dealer gets") ~ "?",
 							(item) {
+								if (!item.weight)
+									return Score.nan;
 								AskState state3 = state2;
-								if (item.isNull)
+								if (item.value.isNull)
 								{
 									if (state3.numItemsHigh > itemsSoFar)
 										state3.numItemsHigh = itemsSoFar;
@@ -471,15 +484,15 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 								{
 									if (state3.numItemsLow < itemsSoFar + 1)
 										state3.numItemsLow = itemsSoFar + 1;
-									state3.items[character][item.get()]++;
+									state3.items[character][item.value.get()]++;
 									state3.itemIndex[character]++;
 									return ask(state3);
 								}
 							},
-							(item) => item.isNull
+							(item) => item.value.isNull
 								? "Nothing (no " ~ (itemsSoFar == 0 ? "" : "more ") ~ "items)"
-								: capitalize(itemDescriptions[item.get()]),
-							itemChoices[0 .. numItemChoices],
+								: capitalize(itemDescriptions[item.value.get()]),
+							options[]
 						);
 
 					// Note, this could also be done by making 0 HP representable...
@@ -573,9 +586,11 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 												alias ItemCNS = CNS!(/*PackedItems*/uint, /*Item*/ubyte, grantedItemsCT, enumLength!Item, true, true);
 												static assert(ItemCNS.packedCard <= PackedItems.max);
 
-												PackedItems[] genItemChoiceTable()
+												Weighted!PackedItems[ItemCNS.packedCard] genItemChoiceTable()
 												{
-													PackedItems[] result;
+													Weighted!PackedItems[ItemCNS.packedCard] result;
+													foreach (PackedItems packedItems, ref option; result)
+														option.value = packedItems;
 
 													/*Item*/ubyte[grantedItemsCT] items;
 													void iterate(size_t itemIndex, int remainingCigarettePacks)
@@ -585,7 +600,8 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 															// `dup` for https://issues.dlang.org/show_bug.cgi?id=24354
 															/*Item*/ubyte[grantedItemsCT] sortedItems = items.dup;
 															sortedItems[].sort();
-															result ~= cast(PackedItems)ItemCNS.pack(sortedItems);
+															auto packedItems = cast(PackedItems)ItemCNS.pack(sortedItems);
+															result[packedItems].weight++;
 														}
 														else
 															foreach (item; Item.init .. enumLength!Item)
@@ -602,10 +618,12 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 
 												static immutable choiceTable = genItemChoiceTable();
 
-												return driver.choice!(ChoiceMode.randomWithDuplicates, PackedItems)(
+												return driver.choice!(ChoiceMode.randomWeighted, Weighted!PackedItems)(
 													() => "What items did " ~ (character == Character.player ? "you" : "the dealer") ~ " get?",
 													(packedItems) {
-														auto items = ItemCNS.unpack(packedItems);
+														if (!packedItems.weight)
+															return Score.nan;
+														auto items = ItemCNS.unpack(packedItems.value);
 														State state4 = state3;
 														foreach (item; items)
 															state4.items[character][item]++;
@@ -614,10 +632,10 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 														return grantItems(state4, nextCharacter);
 													},
 													(packedItems) {
-														auto items = ItemCNS.unpack(packedItems);
+														auto items = ItemCNS.unpack(packedItems.value);
 														return items[].map!(item => itemDescriptions[item]).join(", ").capitalize;
 													},
-													choiceTable,
+													choiceTable[]
 												);
 											}
 
@@ -792,42 +810,6 @@ unittest
 		expand(game, driver, Opponent.game);
 }
 
-template itemCardinality(T)
-{
-	static if (is(T == Nullable!U, U))
-		enum size_t itemCardinality = 1 + itemCardinality!U;
-	else
-	static if (is(T == bool))
-		enum size_t itemCardinality = 2;
-	else
-	static if (is(T == enum))
-		enum size_t itemCardinality = enumLength!T;
-	else
-	static if (is(T == ubyte))
-		enum size_t itemCardinality = 256;
-	else
-		enum size_t itemCardinality = 0;
-}
-
-size_t toCardinal(T)(T value)
-if (itemCardinality!T != 0)
-{
-	static if (is(T == Nullable!U, U))
-		return value.isNull ? 0 : 1 + value.get().toCardinal();
-	else
-		return value;
-}
-
-T fromCardinal(T)(size_t cardinal)
-if (itemCardinality!T != 0)
-{
-	assert(cardinal < itemCardinality!T);
-	static if (is(T == Nullable!U, U))
-		return cardinal == 0 ? T.init : (cardinal - 1).fromCardinal!U().nullable;
-	else
-		return cast(T)cardinal;
-}
-
 /// Standard `Driver.choice` implementation.
 template graphChoice(alias GetScore)
 {
@@ -837,78 +819,67 @@ template graphChoice(alias GetScore)
 		scope string delegate(T) getDescription,
 		scope const(T)[] items...
 	) {
-		final switch (mode)
+		static if (mode == ChoiceMode.random)
 		{
-			case ChoiceMode.random:
-				Score sum = 0;
-				size_t total = 0;
-				foreach (item; items)
+			Score sum = 0;
+			size_t total = 0;
+			foreach (item; items)
+			{
+				auto itemScore = getScore(item);
+				if (!itemScore.isNaN)
 				{
-					auto itemScore = getScore(item);
-					if (!itemScore.isNaN)
-					{
-						sum += itemScore;
-						total ++;
-					}
+					sum += itemScore;
+					total ++;
 				}
-				return sum / total;
-
-			case ChoiceMode.randomWithDuplicates:
-				enum card = itemCardinality!T;
-				static if (card)
-				{
-					size_t[card] counts;
-					foreach (T item; items)
-						counts[item.toCardinal()]++;
-
-					Score sum = 0;
-					size_t total = 0;
-					foreach (index; 0 .. card)
-					{
-						auto item = index.fromCardinal!T;
-						auto count = counts[index];
-						if (!count)
-							continue;
-
-						auto itemScore = getScore(item);
-						if (!itemScore.isNaN)
-						{
-							sum += itemScore * count;
-							total += count;
-						}
-					}
-					return sum / total;
-
-				}
-				else
-					assert(false);
-
-			case ChoiceMode.best:
-				Score bestScore = -Score.max;
-				foreach (item; items)
-				{
-					auto itemScore = getScore(item);
-					if (itemScore > bestScore) // Comparison with NaN will yield false
-						bestScore = itemScore;
-				}
-				assert(bestScore != -Score.max, "All choices are invalid");
-				return bestScore;
-
-			case ChoiceMode.worst:
-			case ChoiceMode.unknown:
-				Score worstScore = Score.max;
-				foreach (item; items)
-				{
-					auto itemScore = getScore(item);
-					if (itemScore < worstScore) // Comparison with NaN will yield false
-						worstScore = itemScore;
-				}
-				assert(worstScore != Score.max, "All choices are invalid");
-				return worstScore;
-
-			case ChoiceMode.first:
-				return getScore(items[0]);
+			}
+			return sum / total;
 		}
+		else static if (mode == ChoiceMode.randomWeighted)
+		{
+			Score sum = 0;
+			size_t total = 0;
+			foreach (item; items)
+			{
+				if (!item.weight)
+					continue;
+
+				auto itemScore = getScore(item);
+				if (!itemScore.isNaN)
+				{
+					sum += itemScore * item.weight;
+					total += item.weight;
+				}
+			}
+			return sum / total;
+		}
+		else static if (mode == ChoiceMode.best)
+		{
+			Score bestScore = -Score.max;
+			foreach (item; items)
+			{
+				auto itemScore = getScore(item);
+				if (itemScore > bestScore) // Comparison with NaN will yield false
+					bestScore = itemScore;
+			}
+			assert(bestScore != -Score.max, "All choices are invalid");
+			return bestScore;
+		}
+		else static if (mode == ChoiceMode.worst || mode == ChoiceMode.unknown)
+		{
+			Score worstScore = Score.max;
+			foreach (item; items)
+			{
+				auto itemScore = getScore(item);
+				if (itemScore < worstScore) // Comparison with NaN will yield false
+					worstScore = itemScore;
+			}
+			assert(worstScore != Score.max, "All choices are invalid");
+			return worstScore;
+		}
+		else static if (mode == ChoiceMode.first)
+			return getScore(items[0]);
+		else
+			static assert(false);
 	}
 }
 

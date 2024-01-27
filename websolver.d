@@ -317,115 +317,93 @@ struct Driver(Scores)
 		struct Option
 		{
 			T item;
-			size_t count;
+			static if (mode == ChoiceMode.randomWeighted)
+				@property auto weight() { return item.weight; }
+			else
+				enum size_t weight = 1;
 			ItemIndex itemIndex;
 			Score score;
 		}
-		Option[] options;
 
-		auto needDeduplication = mode == ChoiceMode.randomWithDuplicates;
-		if (!needDeduplication)
-		{
-			options.length = items.length;
-			foreach (i; 0 .. items.length)
-				options[i] = Option(items[i], 1, i);
-		}
-		else
-		{
-			enum card = itemCardinality!T;
-			static if (card)
-			{
-				size_t[card] counts;
-				ItemIndex[card] itemIndices;
-				foreach_reverse (ItemIndex itemIndex, T item; items)
-				{
-					counts[item.toCardinal()]++;
-					itemIndices[item.toCardinal()] = itemIndex;
-				}
+		auto options = new Option[items.length];
+		foreach (i; 0 .. items.length)
+			options[i] = Option(items[i], i);
 
-				foreach (numericItem; 0 .. card)
-				{
-					auto item = numericItem.fromCardinal!T();
-					auto count = counts[numericItem];
-					if (!count)
-						continue;
-
-					options ~= Option(item, counts[numericItem], itemIndices[numericItem]);
-				}
-			}
-			else
-				assert(false);
-		}
-
+		// Get scores
 		foreach (ref option; options)
 		{
 			interactive = false; scope(exit) interactive = true;
 			option.score = getScore(option.item);
 		}
 
+		// Filter out NaNs
 		foreach_reverse (optionIndex, ref option; options)
 			if (option.score.isNaN)
 				options = options.remove(optionIndex);
 
-		auto includeProbabilities = mode == ChoiceMode.randomWithDuplicates;
+		// Get total weight
+		alias Weight = typeof(Option.init.weight);
+		Weight totalWeight = 0;
+		foreach (ref option; options)
+			totalWeight += option.weight;
+
+		auto includeProbabilities = mode == ChoiceMode.randomWeighted;
 
 		foreach (ref option; options)
 		{
-			assert(option.count);
 			auto jsOption = JSAnalysis.Event.Choice.Option(
 				decisions ~ option.itemIndex,
 				getDescription(option.item),
 				option.score,
 			);
 			if (includeProbabilities)
-				jsOption.probability = 1.0 * option.count / items.length;
+				jsOption.probability = 1.0 * option.weight / totalWeight;
 			event.choice.options ~= jsOption;
 		}
 
+		// The option that's selected by default, if any.
 		Nullable!OptionIndex selectedOptionIndex;
+		// The resulting score. If selectedOptionIndex is non-null, it would be that option's score.
 		Score score = {
-			final switch (mode)
+			static if (mode == ChoiceMode.random || mode == ChoiceMode.randomWeighted)
 			{
-				case ChoiceMode.random:
-				case ChoiceMode.randomWithDuplicates:
-					Score sum = 0;
-					size_t total = 0;
-					foreach (ref option; options)
-						if (!option.score.isNaN)
-						{
-							sum += option.score * option.count;
-							total += option.count;
-						}
-					return sum / total;
-
-				case ChoiceMode.best:
-					Score bestScore = -Score.max;
-					foreach (OptionIndex optionIndex, ref option; options)
-						if (option.score > bestScore) // Comparison with NaN will yield false
-						{
-							bestScore = option.score;
-							selectedOptionIndex = optionIndex;
-						}
-					assert(bestScore != -Score.max, "All choices are invalid");
-					return bestScore;
-
-				case ChoiceMode.worst:
-				case ChoiceMode.unknown:
-					Score worstScore = Score.max;
-					foreach (OptionIndex optionIndex, ref option; options)
-						if (option.score < worstScore) // Comparison with NaN will yield false
-						{
-							worstScore = option.score;
-							selectedOptionIndex = optionIndex;
-						}
-					assert(worstScore != Score.max, "All choices are invalid");
-					return worstScore;
-
-				case ChoiceMode.first:
-					assert(options[0].itemIndex == 0);
-					selectedOptionIndex = 0;
-					return options[0].score;
+				Score sum = 0;
+				foreach (ref option; options)
+					sum += option.score * option.weight;
+				return sum / totalWeight;
 			}
+			else static if (mode == ChoiceMode.best)
+			{
+				Score bestScore = -Score.max;
+				foreach (OptionIndex optionIndex, ref option; options)
+					if (option.score > bestScore)
+					{
+						bestScore = option.score;
+						selectedOptionIndex = optionIndex;
+					}
+				assert(bestScore != -Score.max, "All choices are invalid");
+				return bestScore;
+			}
+			else static if (mode == ChoiceMode.worst || mode == ChoiceMode.unknown)
+			{
+				Score worstScore = Score.max;
+				foreach (OptionIndex optionIndex, ref option; options)
+					if (option.score < worstScore)
+					{
+						worstScore = option.score;
+						selectedOptionIndex = optionIndex;
+					}
+				assert(worstScore != Score.max, "All choices are invalid");
+				return worstScore;
+			}
+			else static if (mode == ChoiceMode.first)
+			{
+				assert(options[0].itemIndex == 0);
+				selectedOptionIndex = 0;
+				return options[0].score;
+			}
+			else
+				static assert(false);
 		}();
 		event.choice.score = score;
 
