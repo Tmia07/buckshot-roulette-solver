@@ -117,8 +117,7 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 		if (targetHealth <= state1.initialHealthMin)
 			return handler(state1, true);
 		else
-			return driver.choice!bool(
-				ChoiceMode.unknown,
+			return driver.choice!(ChoiceMode.unknown, bool)(
 				() => "Is it possible to have " ~ targetHealth.to!string ~ " charges?",
 				(result) {
 					auto state2 = state1;
@@ -173,8 +172,7 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 			foreach (i; 0 .. state.shells[shellType])
 				shells[numShells++] = shellType;
 
-		return driver.choice!ShellType(
-			ChoiceMode.randomWithDuplicates,
+		return driver.choice!(ChoiceMode.randomWithDuplicates, ShellType)(
 			() => "What shell was in the chamber?",
 			(shellType) {
 				State newState = state;
@@ -406,8 +404,7 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 								foreach (i; 0 .. noItemChanceDenominator)
 									itemChoices[numItemChoices++] = !(i < noItemChanceNumerator);
 
-								return driver.choice!bool(
-									ChoiceMode.randomWithDuplicates,
+								return driver.choice!(ChoiceMode.randomWithDuplicates, bool)(
 									() => "No more room, but did " ~ (character == Character.player ? "you" : "the dealer") ~ " get " ~ ["an", "a second", "a third", "a fourth"][itemsSoFar] ~ " item?",
 									(gotItem) {
 										AskState state3 = state2;
@@ -460,8 +457,7 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 							}
 						}
 
-						return driver.choice!(Nullable!Item)(
-							ChoiceMode.randomWithDuplicates,
+						return driver.choice!(ChoiceMode.randomWithDuplicates, Nullable!Item)(
 							() => "What is the" ~ (state2.numItemsHigh == 1 ? "" : [" first", " second", " third", " fourth"][itemsSoFar]) ~ " item that " ~ (character == Character.player ? "you get" : "the dealer gets") ~ "?",
 							(item) {
 								AskState state3 = state2;
@@ -488,8 +484,7 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 
 					// Note, this could also be done by making 0 HP representable...
 					case Phase.charges:
-						return driver.choice!ubyte(
-							ChoiceMode.first,
+						return driver.choice!(ChoiceMode.first, ubyte)(
 							() => "Reset charges?",
 							(charges) {
 								AskState state3 = state2;
@@ -505,8 +500,7 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 						);
 
 					case Phase.shells:
-						return driver.choice!ubyte(
-							ChoiceMode.random,
+						return driver.choice!(ChoiceMode.random, ubyte)(
 							() => "How many shells are loaded?",
 							(totalShells) {
 								AskState state3 = state2;
@@ -531,8 +525,7 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 		}
 		else
 			// Refill magazine.
-			return driver.choice!ubyte(
-				ChoiceMode.random,
+			return driver.choice!(ChoiceMode.random, ubyte)(
 				() => "How many shells are loaded?",
 				(totalShells) {
 					State state2 = state1;
@@ -543,8 +536,7 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 					state2.shells[ShellType.live] = liveShells;
 
 					// Grant items
-					return driver.choice!ubyte(
-						ChoiceMode.random,
+					return driver.choice!(ChoiceMode.random, ubyte)(
 						() => "How many items are granted?",
 						(numItems) {
 							scope Dg!q{Score delegate(ref const State, Character)} grantItems;
@@ -610,8 +602,7 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 
 												static immutable choiceTable = genItemChoiceTable();
 
-												return driver.choice!PackedItems(
-													ChoiceMode.randomWithDuplicates,
+												return driver.choice!(ChoiceMode.randomWithDuplicates, PackedItems)(
 													() => "What items did " ~ (character == Character.player ? "you" : "the dealer") ~ " get?",
 													(packedItems) {
 														auto items = ItemCNS.unpack(packedItems);
@@ -650,8 +641,7 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 	{
 		case Character.player:
 			// Assume that the player will proceed according to what's best for them.
-			return driver.choice!Move(
-				ChoiceMode.best,
+			return driver.choice!(ChoiceMode.best, Move)(
 				() => "What will you do?",
 				move => tryMove(state0, move),
 				move => getMoveDescription(move, Character.player),
@@ -662,8 +652,7 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 			final switch (opponent)
 			{
 				case Opponent.perfect:
-					return driver.choice!Move(
-						ChoiceMode.worst,
+					return driver.choice!(ChoiceMode.worst, Move)(
 						() => "What does the dealer do?",
 						move => tryMove(state0, move),
 						move => getMoveDescription(move, Character.dealer),
@@ -679,8 +668,7 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 						)
 						{
 							assert(items.length == 2);
-							return driver.choice!T(
-								ChoiceMode.random,
+							return driver.choice!(ChoiceMode.random, T)(
 								() => "The dealer flips a coin...",
 								getScore,
 								item => (item == items[0] ? "Heads" : "Tails") ~ ": " ~ getDescription(item),
@@ -730,8 +718,7 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 						if (state1.items[state1.currentTurn][Item.handSaw] && !state1.shotgunSawedOff && knownShell == ShellType.live.nullable)
 							itemOptions[numItemOptions++] = Move.useHandSaw;
 						if (numItemOptions)
-							return driver.choice!Move(
-								ChoiceMode.unknown,
+							return driver.choice!(ChoiceMode.unknown, Move)(
 								() => "The dealer will use an item...",
 								move => tryMove(state1, move),
 								move => getMoveDescription(move, Character.dealer),
@@ -788,8 +775,7 @@ unittest
 		/// A choice is happening.
 		/// Filter out NaNs!
 		/// Caller should be careful to not mutate external state in `getScore`!
-		Score choice(T)(
-			ChoiceMode mode,
+		Score choice(ChoiceMode mode, T)(
 			scope string delegate() description,
 			scope Score delegate(T) nothrow @nogc getScore,
 			scope string delegate(T) getDescription,
@@ -845,8 +831,7 @@ if (itemCardinality!T != 0)
 /// Standard `Driver.choice` implementation.
 template graphChoice(alias GetScore)
 {
-	Score graphChoice(T)(
-		ChoiceMode mode,
+	Score graphChoice(ChoiceMode mode, T)(
 		scope string delegate() description,
 		scope GetScore!T getScore,
 		scope string delegate(T) getDescription,

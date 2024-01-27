@@ -292,8 +292,7 @@ struct Driver(Scores)
 
 	alias GetScore(T) = Score delegate(T);
 
-	Score choice(T)(
-		ChoiceMode mode,
+	Score choice(ChoiceMode mode, T)(
 		scope string delegate() description,
 		scope Score delegate(T) getScore,
 		scope string delegate(T) getDescription,
@@ -302,8 +301,7 @@ struct Driver(Scores)
 		if (!interactive)
 		{
 			alias gc = graphChoice!GetScore;
-			return gc!T(
-				mode,
+			return gc!(mode, T)(
 				description,
 				getScore,
 				getDescription,
