@@ -342,12 +342,14 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 			// Ask questions in the order that the game presents information to players.
 			enum Phase
 			{
+				itemsConfig,
 				playerItems,
 				charges,
 				shells,
 				dealerItems,
 				end,
 			}
+			enum minGrantedItems = 1;
 			enum maxGrantedItems = 4;
 			static struct AskState
 			{
@@ -364,7 +366,7 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 				// 2. Characters can run out of inventory space
 				//    (so the total number of items may not even be knowable...)
 				// These track the lower and upper bound (inclusive):
-				size_t numItemsLow = 0, numItemsHigh = maxGrantedItems;
+				size_t numItemsLow, numItemsHigh;
 				size_t[enumLength!Character] itemIndex;
 			}
 
@@ -380,6 +382,27 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 
 				final switch (state2.phase)
 				{
+					case Phase.itemsConfig:
+						return driver.choice!(ChoiceMode.first, bool)(
+							() => "Are items enabled?",
+							(itemsEnabled) {
+								AskState state3 = state2;
+								if (itemsEnabled)
+								{
+									state3.numItemsLow = minGrantedItems;
+									state3.numItemsHigh = maxGrantedItems;
+								}
+								else
+								{
+									state3.numItemsLow = 0;
+									state3.numItemsHigh = 0;
+								}
+								return nextPhase(state3);
+							},
+							(itemsEnabled) => itemsEnabled ? "Yes" : "No (first act of story mode)",
+							true, false,
+						);
+
 					case Phase.playerItems:
 					case Phase.dealerItems:
 						auto character = state2.phase == Phase.playerItems ? Character.player : Character.dealer;
@@ -645,7 +668,7 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 							return grantItems(state2, Character.init);
 						},
 						numItems => numItems.to!string,
-						0, 1, 2, 3, 4
+						1, 2, 3, 4
 					);
 				},
 				totalShells => totalShells.to!string,
