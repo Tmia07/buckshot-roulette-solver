@@ -1,1 +1,14 @@
 /search_shootself
+# Build output
+*.exe
+*.obj
+*.pdb
+# OpenSSL import libraries (provide your own)
+*.lib
+# Precomputed tables (not used by default)
+/data/
+# Live mode state
+live_state.json
+# Local
+desktop.ini
+.claude/
