@@ -701,3 +701,69 @@ for (let c = 0; c < defaultGame.items.length; c++)
 	if (window.localStorage.getItem('buckshot-roulette-seen-help') === null)
 		document.getElementById('board').classList.add('help-nag');
 });
+
+
+// ----- Live link with the game (SolverBridge.gd in the game -> live.php)
+
+let liveVersion = 0;
+let livePolling = false;
+
+function setLive(on) {
+	document.getElementById('live').checked = on;
+	document.body.classList.toggle('live', on);
+	document.getElementById('live-status').textContent = on ? '(waiting for the game...)' : '';
+	try { window.localStorage.setItem('buckshot-roulette-live', on ? '1' : ''); } catch (e) {}
+	if (on)
+		pollLive();
+}
+
+function applyLive(d) {
+	stateVersion++; // cancel any pending manual query
+	const problem = d.problem;
+	const data = d.analysis;
+	if (!problem || !data)
+		return;
+	currentGame = copyGame('game' in data ? data.game : problem.game);
+	showGame(currentGame);
+	document.getElementById('opponent').value = problem.opponent;
+	addAnalysis(problem, data);
+	document.body.classList.toggle('loading', false);
+	if ('game' in data && 'packedGame' in data) {
+		problem.game = data.game;
+		problem.packedGame = data.packedGame;
+		window.history.replaceState(problem, '', '#' + serialize(problem));
+	}
+	const time = new Date(d.time * 1000).toLocaleTimeString();
+	document.getElementById('live-status').textContent = '(from game, ' + time + ')';
+}
+
+async function pollLive() {
+	const box = document.getElementById('live');
+	if (!box || !box.checked || livePolling || dragging)
+		return;
+	livePolling = true;
+	try {
+		const response = await fetch('live.php?since=' + liveVersion, { cache: 'no-store' });
+		const d = await response.json();
+		if (d.version > liveVersion && d.problem) {
+			liveVersion = d.version;
+			if (document.getElementById('live').checked)
+				applyLive(d);
+		}
+	} catch (e) {
+		document.getElementById('live-status').textContent = '(no connection)';
+	} finally {
+		livePolling = false;
+	}
+}
+
+setInterval(pollLive, 1000);
+
+document.addEventListener('DOMContentLoaded', function() {
+	const box = document.getElementById('live');
+	box.addEventListener('change', () => setLive(box.checked));
+	let saved = '';
+	try { saved = window.localStorage.getItem('buckshot-roulette-live') || ''; } catch (e) {}
+	if (saved === '1')
+		setLive(true);
+});

@@ -172,3 +172,24 @@ h3 { text-align: center; }
 	border: 0.21em solid black;
 }
 #hidden-state button { font-size: inherit; cursor: pointer; }
+
+/* Live link with the game */
+#live-toggle {
+	grid-row: 1;
+	grid-column: 1;
+	align-self: start;
+	justify-self: start;
+	position: relative;
+	left: 13em;
+	top: 2.6em;
+	padding: 0 0.3em;
+	background: white;
+	color: black;
+	border: 0.21em solid black;
+	font-size: 0.8em;
+	white-space: nowrap;
+	cursor: pointer;
+}
+#live-toggle input { margin: 0 0.2em 0 0; }
+#live-status { color: #666; }
+body.live #live-toggle { background: #c8f7c5; }

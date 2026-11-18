@@ -92,6 +92,9 @@
 		<option value="game">Game dealer AI</option>
 		<option value="perfect">Perfect opponent</option>
 	</select>
+	<label id="live-toggle" title="Follow the game automatically (needs SolverBridge in the game)">
+		<input type="checkbox" id="live"> Live <span id="live-status"></span>
+	</label>
 </div>
 
 <!--
