@@ -1,0 +1,247 @@
+/**
+ * ae.net.sync
+ *
+ * License:
+ *   This Source Code Form is subject to the terms of
+ *   the Mozilla Public License, v. 2.0. If a copy of
+ *   the MPL was not distributed with this file, You
+ *   can obtain one at http://mozilla.org/MPL/2.0/.
+ *
+ * Authors:
+ *   Vladimir Panteleev <ae@cy.md>
+ */
+
+module ae.net.sync;
+
+import core.atomic;
+import core.sync.semaphore;
+import core.thread;
+
+import std.exception;
+import std.socket;
+import std.typecons : Flag, Yes;
+
+import ae.net.asockets;
+
+/**
+	An object which allows calling a function in a different thread.
+	Create ThreadAnchor in the main thread (the thread in which the
+	code will run in), and then call runWait or runAsync from a
+	different thread.
+
+	The main thread must be running an unblocked ae.net.asockets
+	event loop.
+
+	Example:
+	---
+	void onConnect(TcpConnection socket)
+	{
+		auto mainThread = thisThread;
+		new Thread({
+			string s = readln();
+			mainThread.runAsync({
+				socket.send(s);
+				socket.disconnect();
+			});
+		}).start();
+	}
+	---
+**/
+
+final class ThreadAnchor : TcpConnection
+{
+private:
+	alias Dg = void delegate();
+
+	static struct Command
+	{
+		Dg dg;
+		Semaphore* semaphore;
+	}
+
+	enum queueSize = 1024;
+
+	final static class AnchorSocket : TcpConnection
+	{
+		Socket pinger;
+
+		// Ensure the GC can reach delegates
+		// Must be preallocated - can't allocate in signal handlers
+		Command[queueSize] queue;
+		shared size_t writeIndex;
+
+		// Best-effort attempt at keeping `AnchorSocket` alive
+		// (non-daemon) when there are in-flight submissions,
+		// even when `daemon==true`.
+		// For this to work reliably, the target thread's event loop
+		// must have some reason to not exit (other than this
+		// `ThreadAnchor`) up until `runAsync` (in the sender thread)
+		// returns.
+		shared size_t numPending;
+		bool daemon;
+
+		this(bool daemon)
+		{
+			auto pair = tcpSocketPair();
+			pair[0].blocking = false;
+			super(pair[0]);
+			pinger = pair[1];
+			this.handleReadData = &onReadData;
+			this.daemon = daemon;
+			this.daemonRead = daemon;
+		}
+
+		void onReadData(Data data)
+		{
+			data.asDataOf!size_t.enter((scope indices) {
+				foreach (index; indices)
+				{
+					auto command = queue[index];
+					queue[index] = Command.init;
+					command.dg();
+					if (command.semaphore)
+						command.semaphore.notify();
+				}
+				auto remaining = numPending.atomicOp!"-="(indices.length);
+				this.daemonRead = daemon && remaining == 0;
+			});
+		}
+	}
+
+	AnchorSocket socket;
+
+	void sendCommand(size_t index) nothrow @nogc
+	{
+		// https://github.com/dlang/phobos/pull/4273
+		(cast(void delegate(size_t index) nothrow @nogc)&sendCommandImpl)(index);
+	}
+
+	void sendCommandImpl(size_t index)
+	{
+		size_t[1] data;
+		data[0] = index;
+		socket.pinger.send(data[]);
+	}
+
+	void runCommand(Command command) nothrow @nogc
+	{
+		assert(command.dg);
+		auto index = (socket.writeIndex.atomicOp!"+="(1)-1) % queueSize;
+		if (socket.queue[index].dg !is null)
+			assert(false, "ThreadAnchor queue overrun");
+		socket.queue[index] = command;
+		socket.daemonRead = false;
+		atomicOp!"+="(socket.numPending, 1);
+		sendCommand(index);
+	}
+
+public:
+	/// Constructor.
+	/// Params:
+	///  daemon  = If `Yes.daemon` (the default), don't block the event
+	///            loop from exiting until `close` is called.
+	this(Flag!"daemon" daemon = Yes.daemon)
+	{
+		socket = new AnchorSocket(daemon);
+	}
+
+	/// Pre-signal that a pending operation will be submitted later
+	/// via `runAsync`. Keeps the event loop alive (by temporarily
+	/// making this a non-daemon socket) until the callback completes.
+	/// Must be called from the event loop thread.
+	void armPending() nothrow @nogc
+	{
+		socket.daemonRead = false;
+	}
+
+	/// Cancel a previous `armPending` call. Restores the daemon state
+	/// so this socket no longer prevents the event loop from exiting.
+	/// Must be called from the event loop thread.
+	void disarmPending() nothrow @nogc
+	{
+		socket.daemonRead = socket.daemon;
+	}
+
+	/// Run the specified delegate in the origin thread,
+	/// without waiting for it to finish.
+	void runAsync(Dg dg) nothrow @nogc
+	{
+		runCommand(Command(dg));
+	}
+
+	/// Run the specified delegate in the origin thread,
+	/// and wait for it to finish.
+	void runWait(Dg dg)
+	{
+		scope semaphore = new Semaphore();
+		runCommand(Command(dg, &semaphore));
+		semaphore.wait();
+	}
+
+	/// Close the connection to the main thread.
+	void close()
+	{
+		socket.pinger.close();
+	}
+}
+
+debug(ae_unittest) unittest
+{
+	// keep socketManager running -
+	// ThreadAnchor sockets are daemon
+	auto dummy = new TcpServer();
+	dummy.listen(0, "localhost");
+	dummy.handleAccept = (TcpConnection incoming) {};
+
+	import ae.sys.timing;
+
+	int n = 0;
+	Thread t;
+
+	// Queue to run this as soon as event loop starts
+	setTimeout({
+		auto anchor = new ThreadAnchor;
+		t = new Thread({
+			anchor.runWait({
+				assert(n==0); n++;
+			});
+			anchor.runAsync(&dummy.close);
+			assert(n==1); n++;
+		}).start();
+	}, Duration.zero);
+
+	socketManager.loop();
+	t.join();
+	assert(n==2);
+}
+
+/// Return a `ThreadAnchor` for the current thread.
+/// One instance is created and reused per thread.
+@property ThreadAnchor thisThread()
+{
+	static ThreadAnchor instance;
+	if (!instance)
+		instance = new ThreadAnchor();
+	return instance;
+}
+
+/// A version of `std.socket.socketPair` which always creates TCP sockets, like on Windows.
+/// Used to work around https://stackoverflow.com/q/10899814/21501,
+/// i.e. AF_UNIX socket pairs' limit of not being able
+/// to enqueue more than 278 packets without blocking.
+private Socket[2] tcpSocketPair() @trusted
+{
+	Socket[2] result;
+
+	auto listener = new TcpSocket();
+	listener.setOption(SocketOptionLevel.SOCKET, SocketOption.REUSEADDR, true);
+	listener.bind(new InternetAddress(INADDR_LOOPBACK, InternetAddress.PORT_ANY));
+	auto addr = listener.localAddress;
+	listener.listen(1);
+
+	result[0] = new TcpSocket(addr);
+	result[1] = listener.accept();
+
+	listener.close();
+	return result;
+}

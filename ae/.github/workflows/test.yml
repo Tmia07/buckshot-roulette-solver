@@ -1,0 +1,99 @@
+name: test
+on: [push, pull_request]
+
+jobs:
+  test:
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-2022, macos-14]
+        dc: [dmd-2.111.0, ldc-1.32.2]
+        arch: [x86_64]
+        include:
+          # also test an older DMD verrsion
+          - os: ubuntu-22.04
+            dc: dmd-2.096.0
+            arch: x86_64
+          # also test 32-bit (but only on Windows)
+          - os: windows-2022
+            dc: ldc-1.32.2
+            arch: x86_mscoff # not x86 to avoid OPTLINK deadlock bugs
+        exclude:
+          # Do not try to use DMD on Windows
+          # https://issues.dlang.org/show_bug.cgi?id=22044
+          - os: windows-2022
+            dc: dmd-2.111.0
+          # Do not try to use DMD on macOS
+          # Fails to link with errors such as:
+          # "ld: r_symbolnum=20 out of range in '.../libae.a[11668](xmlwriter_2cc8_ad9.o)'"
+          - os: macos-14
+            dc: dmd-2.111.0
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v2
+      - name: Install D compiler
+        uses: dlang-community/setup-dlang@934047eba531212a2c77e7c1b5999d32c2becb81
+        with:
+          compiler: ${{ matrix.dc }}
+
+      # https://github.com/dlang-community/setup-dlang/issues/85
+      - name: Set up PATH on Windows/x86 for LDC libcurl.dll
+        if: ${{ matrix.os == 'windows-2022' && matrix.dc == 'ldc-1.32.2' && matrix.arch == 'x86_mscoff' }}
+        run: |
+          echo "C:\hostedtoolcache\windows\ldc2\1.32.2\x64\ldc2-1.32.2-windows-multilib\lib32" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - run: dub test --debug=ae_unittest --arch=${{ matrix.arch }}
+
+      # Test in non-UTC timezone
+      - run: dub test --debug=ae_unittest --arch=${{ matrix.arch }}
+        env:
+          TZ: America/New_York
+
+      - run: dub test --debug=ae_unittest --arch=${{ matrix.arch }} :sys-net-test
+
+      - if: ${{ matrix.os == 'ubuntu-22.04' }}
+        run: dub test --debug=ae_unittest --arch=${{ matrix.arch }} :sqlite
+
+      - if: ${{ matrix.os == 'ubuntu-22.04' && matrix.dc == 'dmd-2.111.0' }} # old Dub versions can't fetch packages
+        run: dub test --debug=ae_unittest --arch=${{ matrix.arch }} :libpng
+
+      - if: ${{ matrix.dc == 'dmd-2.111.0' }}
+        run: dub test --debug=ae_unittest --arch=${{ matrix.arch }} :windows
+
+  compilation-test:
+    timeout-minutes: 5
+    strategy:
+      matrix:
+        os: [ubuntu-22.04]
+        dc: [dmd-2.111.0]
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v2
+      - name: Install D compiler
+        uses: dlang-community/setup-dlang@934047eba531212a2c77e7c1b5999d32c2becb81
+        with:
+          compiler: ${{ matrix.dc }}
+
+      - run: ./makejson.sh
+
+      - shell: bash
+        run: ./testflags.sh
+
+  nix:
+    timeout-minutes: 60
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v18
+
+      - name: Setup Nix cache
+        uses: DeterminateSystems/magic-nix-cache-action@v11
+
+      - name: Run flake checks
+        run: nix flake check --print-build-logs

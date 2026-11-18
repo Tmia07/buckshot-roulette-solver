@@ -1,0 +1,1070 @@
+/**
+ * OpenSSL support.
+ *
+ * License:
+ *   This Source Code Form is subject to the terms of
+ *   the Mozilla Public License, v. 2.0. If a copy of
+ *   the MPL was not distributed with this file, You
+ *   can obtain one at http://mozilla.org/MPL/2.0/.
+ *
+ * Authors:
+ *   Vladimir Panteleev <ae@cy.md>
+ */
+
+/**
+   This module selects which OpenSSL version to target depending on
+   what version of D bindings are available. The "openssl" Deimos
+   package version 1.x targets OpenSSL 1.0, and version 2.x targets
+   OpenSSL 1.1.
+
+   If you use ae with Dub, you can specify the version of the OpenSSL
+   D bindings in your project's dub.sdl. The ae:openssl subpackage
+   also has configurations which indicate the library file names to
+   link against.
+
+   Thus, to target OpenSSL 1.0, you can use:
+
+   ---
+   dependency "ae:openssl" version="..."
+   dependency "openssl" version="~>1.0"
+   subConfiguration "ae:openssl" "lib-explicit-1.0"
+   ---
+
+   And, to target OpenSSL 1.1:
+
+   ---
+   dependency "ae:openssl" version="..."
+   dependency "openssl" version="~>2.0"
+   subConfiguration "ae:openssl" "lib-implicit-1.1"
+   ---
+ */
+
+module ae.net.ssl.openssl;
+
+import core.stdc.stdint;
+
+import std.conv : to;
+import std.exception : enforce, errnoEnforce;
+import std.functional;
+import std.socket;
+import std.string;
+
+//import deimos.openssl.rand;
+import deimos.openssl.ssl;
+import deimos.openssl.err;
+import deimos.openssl.pkcs12 : PKCS12;
+import deimos.openssl.x509_vfy;
+import deimos.openssl.x509v3;
+
+import ae.net.asockets;
+import ae.net.ssl;
+import ae.utils.array : nonNull;
+import ae.utils.exception : CaughtException;
+import ae.utils.meta : enumLength;
+import ae.utils.text;
+
+debug(OPENSSL) import std.stdio : stderr;
+debug(OPENSSL_DATA) import std.stdio : stderr;
+
+// ***************************************************************************
+
+/// Are the current Deimos OpenSSL bindings 1.1 or newer?
+static if (is(typeof(OPENSSL_MAKE_VERSION)))
+	enum isOpenSSL11 = OPENSSL_VERSION_NUMBER >= OPENSSL_MAKE_VERSION(1, 1, 0, 0);
+else
+	enum isOpenSSL11 = false;
+
+static if (is(typeof(OPENSSL_MAKE_VERSION)))
+	enum isOpenSSL30 = OPENSSL_VERSION_NUMBER >= OPENSSL_MAKE_VERSION(3, 0, 0, 0);
+else
+	enum isOpenSSL30 = false;
+
+/// `mixin` this in your program to link to OpenSSL.
+mixin template SSLUseLib()
+{
+	static if (ae.net.ssl.openssl.isOpenSSL11)
+	{
+		pragma(lib, "ssl");
+		pragma(lib, "crypto");
+	}
+	else
+	{
+		version(Win64)
+		{
+			pragma(lib, "ssleay32");
+			pragma(lib, "libeay32");
+		}
+		else
+		{
+			pragma(lib, "ssl");
+			version(Windows)
+				{ pragma(lib, "eay"); }
+			else
+				{ pragma(lib, "crypto"); }
+		}
+	}
+}
+
+// Patch up incomplete Deimos bindings.
+
+private
+{
+	enum TLS1_3_VERSION = 0x0304;
+	enum SSL_CTRL_SET_MIN_PROTO_VERSION          = 123;
+	enum SSL_CTRL_SET_MAX_PROTO_VERSION          = 124;
+	long SSL_CTX_set_min_proto_version(SSL_CTX* ctx, int version_) { return SSL_CTX_ctrl(ctx, SSL_CTRL_SET_MIN_PROTO_VERSION, version_, null); }
+	long SSL_CTX_set_max_proto_version(SSL_CTX* ctx, int version_) { return SSL_CTX_ctrl(ctx, SSL_CTRL_SET_MAX_PROTO_VERSION, version_, null); }
+
+	static if (isOpenSSL11)
+	{
+		alias SSLv23_client_method = TLS_client_method;
+		alias SSLv23_server_method = TLS_server_method;
+		void SSL_load_error_strings() {}
+		struct OPENSSL_INIT_SETTINGS;
+		extern(C) void OPENSSL_init_ssl(uint64_t opts, const OPENSSL_INIT_SETTINGS *settings) nothrow;
+		void SSL_library_init() { OPENSSL_init_ssl(0, null); }
+		void OpenSSL_add_all_algorithms() { SSL_library_init(); }
+		extern(C) BIGNUM *BN_get_rfc3526_prime_1536(BIGNUM *bn) nothrow;
+		alias get_rfc3526_prime_1536 = BN_get_rfc3526_prime_1536;
+		extern(C) BIGNUM *BN_get_rfc3526_prime_2048(BIGNUM *bn) nothrow;
+		alias get_rfc3526_prime_2048 = BN_get_rfc3526_prime_2048;
+		extern(C) BIGNUM *BN_get_rfc3526_prime_3072(BIGNUM *bn) nothrow;
+		alias get_rfc3526_prime_3072 = BN_get_rfc3526_prime_3072;
+		extern(C) BIGNUM *BN_get_rfc3526_prime_4096(BIGNUM *bn) nothrow;
+		alias get_rfc3526_prime_4096 = BN_get_rfc3526_prime_4096;
+		extern(C) BIGNUM *BN_get_rfc3526_prime_6144(BIGNUM *bn) nothrow;
+		alias get_rfc3526_prime_6144 = BN_get_rfc3526_prime_6144;
+		extern(C) BIGNUM *BN_get_rfc3526_prime_8192(BIGNUM *bn) nothrow;
+		alias get_rfc3526_prime_8192 = BN_get_rfc3526_prime_8192;
+		extern(C) int SSL_in_init(const SSL *s) nothrow;
+		extern(C) int SSL_CTX_set_ciphersuites(SSL_CTX* ctx, const(char)* str);
+		extern(C) void SSL_CTX_set_security_level(SSL_CTX* ctx, int level) nothrow;
+
+		static if (isOpenSSL30)
+		{
+			import deimos.openssl.evp : EVP_PKEY, EVP_PKEY_CTX;
+			import deimos.openssl.types : OSSL_LIB_CTX, OSSL_PARAM;
+
+			struct OSSL_PARAM_BLD;
+
+			enum EVP_PKEY_KEY_PARAMETERS = 0x84;
+			enum OSSL_PKEY_PARAM_GROUP_NAME = "group";
+
+			extern(C) EVP_PKEY_CTX* EVP_PKEY_CTX_new_from_name(OSSL_LIB_CTX* libctx, const(char)* name, const(char)* propquery) nothrow;
+			extern(C) int EVP_PKEY_fromdata_init(EVP_PKEY_CTX* ctx) nothrow;
+			extern(C) int EVP_PKEY_fromdata(EVP_PKEY_CTX* ctx, EVP_PKEY** ppkey, int selection, OSSL_PARAM* params) nothrow;
+			extern(C) OSSL_PARAM_BLD* OSSL_PARAM_BLD_new() nothrow;
+			extern(C) int OSSL_PARAM_BLD_push_utf8_string(OSSL_PARAM_BLD* bld, const(char)* key, const(char)* buf, size_t bsize) nothrow;
+			extern(C) OSSL_PARAM* OSSL_PARAM_BLD_to_param(OSSL_PARAM_BLD* bld) nothrow;
+			extern(C) void OSSL_PARAM_BLD_free(OSSL_PARAM_BLD* bld) nothrow;
+			extern(C) void OSSL_PARAM_free(OSSL_PARAM* params) nothrow;
+			extern(C) int SSL_CTX_set0_tmp_dh_pkey(SSL_CTX* ctx, EVP_PKEY* dhpkey) nothrow;
+		}
+	}
+	else
+	{
+		extern(C) void X509_VERIFY_PARAM_set_hostflags(X509_VERIFY_PARAM *param, uint flags) nothrow;
+		extern(C) X509_VERIFY_PARAM *SSL_get0_param(SSL *ssl) nothrow;
+		enum X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS = 0x4;
+		extern(C) int X509_VERIFY_PARAM_set1_host(X509_VERIFY_PARAM *param, const char *name, size_t namelen) nothrow;
+	}
+
+	alias SSL_CTX_set_tlsext_servername_callback_fun = extern(C) int function(SSL *s, int *al, void *arg);
+	alias SSL_CTX_callback_ctrl_fun = extern (C) void function();
+	auto SSL_CTX_set_tlsext_servername_callback(SSL_CTX* ctx, SSL_CTX_set_tlsext_servername_callback_fun cb) {
+		return SSL_CTX_callback_ctrl(ctx, SSL_CTRL_SET_TLSEXT_SERVERNAME_CB, cast(SSL_CTX_callback_ctrl_fun)cb);
+	}
+
+	extern(C) void PKCS12_free(PKCS12* a) nothrow;
+}
+
+// ***************************************************************************
+
+shared static this()
+{
+	SSL_load_error_strings();
+	SSL_library_init();
+	OpenSSL_add_all_algorithms();
+}
+
+// ***************************************************************************
+
+/// `SSLProvider` implementation.
+class OpenSSLProvider : SSLProvider
+{
+	override SSLContext createContext(SSLContext.Kind kind)
+	{
+		return new OpenSSLContext(kind);
+	} ///
+
+	override SSLAdapter createAdapter(SSLContext context, IConnection next)
+	{
+		auto ctx = cast(OpenSSLContext)context;
+		if (!ctx) assert(false, "Not an OpenSSLContext");
+		return new OpenSSLAdapter(ctx, next);
+	} ///
+}
+
+/// `SSLContext` implementation.
+class OpenSSLContext : SSLContext
+{
+	SSL_CTX* sslCtx; /// The C OpenSSL context object.
+	Kind kind; /// Client or server.
+	Verify verify; ///
+
+	const(ubyte)[] psk; /// PSK (Pre-Shared Key) configuration.
+	string pskID; /// ditto
+
+	this(Kind kind)
+	{
+		this.kind = kind;
+
+		const(SSL_METHOD)* method;
+
+		final switch (kind)
+		{
+			case Kind.client:
+				method = SSLv23_client_method().sslEnforce();
+				break;
+			case Kind.server:
+				method = SSLv23_server_method().sslEnforce();
+				break;
+		}
+		sslCtx = SSL_CTX_new(method).sslEnforce();
+		setOpenSSLCipherList(["ALL", "!MEDIUM", "!LOW", "!aNULL", "!eNULL", "!SSLv2", "!DH", "!TLSv1"]);
+		SSL_CTX_set_min_proto_version(sslCtx, TLS1_2_VERSION);
+
+		SSL_CTX_set_default_verify_paths(sslCtx);
+
+        if (kind == Kind.server)
+		{
+            SSL_CTX_set_tlsext_servername_callback(sslCtx, &servernameCallback);
+            SSL_CTX_set_tlsext_servername_arg(sslCtx, cast(void*)this);
+        }
+	} ///
+
+	~this()
+	{
+		SSL_CTX_free(sslCtx);
+	}
+
+	/// OpenSSL uses different APIs to specify the cipher list for
+	/// TLSv1.2 and below and to specify the ciphersuites for TLSv1.3.
+	/// When calling `setOpenSSLCipherList`, use this value to delimit them:
+	/// values before `cipherListTLS13Delimiter` will be specified via
+	/// SSL_CTX_set_cipher_list (for TLSv1.2 and older), and those
+	/// after `cipherListTLS13Delimiter` will be specified via
+	/// `SSL_CTX_set_ciphersuites` (for TLSv1.3).
+	static immutable cipherListTLS13Delimiter = "\0ae-net-ssl-openssl-cipher-list-tls-1.3-delimiter";
+
+	/// Configure the OpenSSL-format cipher list.
+	/// Use `cipherListTLS13Delimiter` to separate TLS 1.2 and TLS 1.3 entries.
+	void setOpenSSLCipherList(string[] ciphers)
+	{
+		assert(ciphers.length, "Empty cipher list");
+		import std.algorithm.searching : findSplit;
+		auto parts = ciphers.findSplit((&cipherListTLS13Delimiter)[0..1]);
+		auto oldCiphers = parts[0];
+		auto newCiphers = parts[2];
+		if (oldCiphers.length)
+			SSL_CTX_set_cipher_list(sslCtx, oldCiphers.join(":").toStringz()).sslEnforce();
+		if (newCiphers.length)
+		{
+			static if (isOpenSSL11)
+				SSL_CTX_set_ciphersuites(sslCtx, newCiphers.join(":").toStringz()).sslEnforce();
+			else
+				assert(false, "Not built against OpenSSL version with TLSv1.3 support.");
+		}
+	}
+
+	deprecated("Use setOpenSSLCipherList directly on OpenSSLContext, or setCipherSuites for a portable alternative")
+	override void setCipherList(string[] ciphers)
+	{
+		setOpenSSLCipherList(ciphers);
+	} /// ditto
+
+	override void enableDH(int bits)
+	{
+		typeof(&get_rfc3526_prime_2048) func;
+		string groupName;
+
+		switch (bits)
+		{
+			case 1536: func = &get_rfc3526_prime_1536; groupName = "modp_1536"; break;
+			case 2048: func = &get_rfc3526_prime_2048; groupName = "modp_2048"; break;
+			case 3072: func = &get_rfc3526_prime_3072; groupName = "modp_3072"; break;
+			case 4096: func = &get_rfc3526_prime_4096; groupName = "modp_4096"; break;
+			case 6144: func = &get_rfc3526_prime_6144; groupName = "modp_6144"; break;
+			case 8192: func = &get_rfc3526_prime_8192; groupName = "modp_8192"; break;
+			default: assert(false, "No RFC3526 prime available for %d bits".format(bits));
+		}
+
+		static if (isOpenSSL30)
+		{
+			import deimos.openssl.evp : EVP_PKEY, EVP_PKEY_CTX_free, EVP_PKEY_free;
+
+			auto pkeyCtx = EVP_PKEY_CTX_new_from_name(null, "DH", null).sslEnforce();
+			scope(exit) EVP_PKEY_CTX_free(pkeyCtx);
+			EVP_PKEY_fromdata_init(pkeyCtx).sslEnforce();
+
+			auto paramsBuilder = OSSL_PARAM_BLD_new().sslEnforce();
+			scope(exit) OSSL_PARAM_BLD_free(paramsBuilder);
+			OSSL_PARAM_BLD_push_utf8_string(paramsBuilder, OSSL_PKEY_PARAM_GROUP_NAME, groupName.toStringz(), 0).sslEnforce();
+
+			auto params = OSSL_PARAM_BLD_to_param(paramsBuilder).sslEnforce();
+			scope(exit) OSSL_PARAM_free(params);
+
+			EVP_PKEY* pkey;
+			scope(exit) { if (pkey) EVP_PKEY_free(pkey); }
+			EVP_PKEY_fromdata(pkeyCtx, &pkey, EVP_PKEY_KEY_PARAMETERS, params).sslEnforce();
+			SSL_CTX_set0_tmp_dh_pkey(sslCtx, pkey).sslEnforce();
+			pkey = null;
+		}
+		else
+		{
+			DH* dh;
+			scope(exit) DH_free(dh);
+
+			dh = DH_new().sslEnforce();
+			dh.p = func(null).sslEnforce();
+			ubyte gen = 2;
+			dh.g = BN_bin2bn(&gen, gen.sizeof, null);
+			SSL_CTX_set_tmp_dh(sslCtx, dh).sslEnforce();
+		}
+	} /// ditto
+
+	override void enableECDH()
+	{
+		auto ecdh = EC_KEY_new_by_curve_name(NID_X9_62_prime256v1).sslEnforce();
+		scope(exit) EC_KEY_free(ecdh);
+		SSL_CTX_set_tmp_ecdh(sslCtx, ecdh).sslEnforce();
+	} /// ditto
+
+	override void setCertificate(string path)
+	{
+		SSL_CTX_use_certificate_chain_file(sslCtx, toStringz(path))
+			.sslEnforce("Failed to load certificate file " ~ path);
+	} /// ditto
+
+	override void setPrivateKey(string path)
+	{
+		SSL_CTX_use_PrivateKey_file(sslCtx, toStringz(path), SSL_FILETYPE_PEM)
+			.sslEnforce("Failed to load private key file " ~ path);
+	} /// ditto
+
+	override void setIdentityFromPKCS12(string path, string password)
+	{
+		import std.file : read;
+		setIdentityFromPKCS12(cast(const(ubyte)[]) read(path), password);
+	} /// ditto
+
+	override void setIdentityFromPKCS12(const(ubyte)[] data, string password)
+	{
+		import deimos.openssl.pkcs12 : PKCS12_parse, d2i_PKCS12_bio;
+		import deimos.openssl.bio : BIO_new_mem_buf, BIO_free;
+		import deimos.openssl.evp : EVP_PKEY_free;
+		import deimos.openssl.x509 : X509_free;
+		import deimos.openssl.safestack : STACK_OF;
+		import deimos.openssl.stack : _STACK, OPENSSL_sk_num, OPENSSL_sk_free, OPENSSL_sk_shift, OPENSSL_sk_pop_free;
+
+		auto bio = BIO_new_mem_buf(cast(void*) data.ptr, cast(int) data.length)
+			.sslEnforce("BIO_new_mem_buf");
+		scope(exit) BIO_free(bio);
+
+		PKCS12* p12 = d2i_PKCS12_bio(bio, null)
+			.sslEnforce("d2i_PKCS12_bio");
+		scope(exit) PKCS12_free(p12);
+
+		EVP_PKEY* pkey;
+		X509* cert;
+		STACK_OF!(X509)* ca;
+		PKCS12_parse(p12, password.toStringz, &pkey, &cert, &ca)
+			.sslEnforce("PKCS12_parse");
+		scope(exit) { if (pkey) EVP_PKEY_free(pkey); }
+		scope(exit) { if (cert) X509_free(cert); }
+		alias CertFreeFunc = extern(C) void function(void*);
+		auto caRaw = cast(_STACK*) ca;
+		// Shift each cert out of the stack before transferring to SSL_CTX.
+		// SSL_CTX_add_extra_chain_cert steals ownership; on partial failure
+		// remaining certs are still in caRaw and freed by scope(exit) pop_free.
+		scope(exit) { if (caRaw) OPENSSL_sk_pop_free(caRaw, cast(CertFreeFunc) &X509_free); }
+
+		SSL_CTX_use_certificate(sslCtx, cert).sslEnforce("SSL_CTX_use_certificate");
+		SSL_CTX_use_PrivateKey(sslCtx, pkey).sslEnforce("SSL_CTX_use_PrivateKey");
+		if (caRaw)
+		{
+			while (OPENSSL_sk_num(caRaw) > 0)
+			{
+				auto chainCert = cast(X509*) OPENSSL_sk_shift(caRaw);
+				SSL_CTX_add_extra_chain_cert(sslCtx, chainCert).sslEnforce("SSL_CTX_add_extra_chain_cert");
+			}
+			// caRaw is now empty; pop_free on empty stack is a no-op.
+		}
+	} /// ditto
+
+	override void setPreSharedKey(string id, const(ubyte)[] key)
+	{
+		pskID = id;
+		psk = key;
+
+		final switch (kind)
+		{
+			case Kind.client: SSL_CTX_set_psk_client_callback(sslCtx, psk ? &pskClientCallback : null); break;
+			case Kind.server: SSL_CTX_set_psk_server_callback(sslCtx, psk ? &pskServerCallback : null); break;
+		}
+	} /// ditto
+
+	extern (C) private static uint pskClientCallback(
+		SSL* ssl, const(char)* hint,
+		char* identity, uint max_identity_len, ubyte* psk,
+		uint max_psk_len)
+	{
+		debug(OPENSSL) stderr.writeln("pskClientCallback! hint=", hint);
+
+		auto self = cast(OpenSSLAdapter)SSL_get_ex_data(ssl, 0);
+		if (self.context.pskID.length + 1 > max_identity_len ||
+			self.context.psk.length       > max_psk_len)
+		{
+			debug(OPENSSL) stderr.writeln("PSK or PSK ID too long");
+			return 0;
+		}
+
+		identity[0 .. self.context.pskID.length] = self.context.pskID[];
+		identity[     self.context.pskID.length] = 0;
+		psk[0 .. self.context.psk.length] = self.context.psk[];
+		return cast(uint)self.context.psk.length;
+	}
+
+	extern (C) private static uint pskServerCallback(
+		SSL* ssl, const(char)* identity,
+		ubyte* psk, uint max_psk_len)
+	{
+		auto self = cast(OpenSSLAdapter)SSL_get_ex_data(ssl, 0);
+		auto identityStr = fromStringz(identity);
+		if (identityStr != self.context.pskID)
+		{
+			debug(OPENSSL) stderr.writefln("PSK ID mismatch: expected %s, got %s",
+				self.context.pskID, identityStr);
+			return 0;
+		}
+		if (self.context.psk.length > max_psk_len)
+		{
+			debug(OPENSSL) stderr.writeln("PSK too long");
+			return 0;
+		}
+		psk[0 .. self.context.psk.length] = self.context.psk[];
+		return cast(uint)self.context.psk.length;
+	}
+
+    extern (C) private static int servernameCallback(SSL* ssl, int* ad, void* arg)
+    {
+        auto context = cast(OpenSSLContext)arg;
+		auto adapter = cast(OpenSSLAdapter)SSL_get_ex_data(ssl, 0);
+
+        auto sniName = SSL_get_servername(ssl, TLSEXT_NAMETYPE_host_name);
+        if (sniName)
+        {
+            adapter.sniHostname = fromStringz(sniName).idup;
+            debug(OPENSSL) stderr.writeln("SNI hostname: ", context.sniHostname);
+        }
+        else
+        {
+            adapter.sniHostname = null;
+            debug(OPENSSL) stderr.writeln("No SNI hostname provided.");
+        }
+
+        return SSL_TLSEXT_ERR_OK;
+    }
+
+	override void setPeerVerify(Verify verify)
+	{
+		static const int[enumLength!Verify] modes =
+		[
+			SSL_VERIFY_NONE,
+			SSL_VERIFY_PEER,
+			SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT,
+		];
+		SSL_CTX_set_verify(sslCtx, modes[verify], null);
+		this.verify = verify;
+	} /// ditto
+
+	override void setPeerRootCertificate(string path)
+	{
+		auto szPath = toStringz(path);
+		SSL_CTX_load_verify_locations(sslCtx, szPath, null).sslEnforce();
+
+		if (kind == Kind.server)
+		{
+			auto list = SSL_load_client_CA_file(szPath).sslEnforce();
+			SSL_CTX_set_client_CA_list(sslCtx, list);
+		}
+	} /// ditto
+
+	override void setFlags(int flags)
+	{
+		SSL_CTX_set_options(sslCtx, flags).sslEnforce();
+	} /// ditto
+
+	private static immutable int[enumLength!SSLVersion] sslVersions = [
+		0,
+		SSL3_VERSION,
+		TLS1_VERSION,
+		TLS1_1_VERSION,
+		TLS1_2_VERSION,
+		TLS1_3_VERSION,
+	];
+
+	override void setMinimumVersion(SSLVersion v)
+	{
+		SSL_CTX_set_min_proto_version(sslCtx, sslVersions[v]).sslEnforce();
+	} /// ditto
+
+	override void setMaximumVersion(SSLVersion v)
+	{
+		SSL_CTX_set_max_proto_version(sslCtx, sslVersions[v]).sslEnforce();
+	} /// ditto
+
+	override void setCipherSuites(string[] ianaNames)
+	{
+		import std.algorithm.searching : startsWith;
+		string[] tls13Suites;
+		string[] tls12Suites;
+		foreach (name; ianaNames)
+		{
+			if (name.startsWith("TLS_AES_") || name.startsWith("TLS_CHACHA20_"))
+				tls13Suites ~= name;
+			else
+				tls12Suites ~= name;
+		}
+		if (tls12Suites.length)
+			SSL_CTX_set_cipher_list(sslCtx, tls12Suites.join(":").toStringz()).sslEnforce();
+		if (tls13Suites.length)
+		{
+			static if (isOpenSSL11)
+				SSL_CTX_set_ciphersuites(sslCtx, tls13Suites.join(":").toStringz()).sslEnforce();
+			else
+				throw new Exception("TLS 1.3 cipher suite selection requires OpenSSL 1.1+");
+		}
+	} /// ditto
+}
+
+static this()
+{
+	ssl = new OpenSSLProvider();
+}
+
+// ***************************************************************************
+
+/// `SSLAdapter` implementation.
+class OpenSSLAdapter : SSLAdapter
+{
+	SSL* sslHandle; /// The C OpenSSL connection object.
+	OpenSSLContext context; ///
+	ConnectionState connectionState; ///
+	const(char)* hostname; ///
+	private string sniHostname;
+
+	this(OpenSSLContext context, IConnection next)
+	{
+		this.context = context;
+		super(next);
+
+		if (next.state == ConnectionState.connected)
+			onConnect();
+	} ///
+
+	override void onConnect()
+	{
+		debug(OPENSSL) stderr.writefln("OpenSSL: * Transport is connected");
+
+		// Create SSL handle (or recreate after disconnect/reconnect)
+		sslHandle = sslEnforce(SSL_new(context.sslCtx));
+		SSL_set_ex_data(sslHandle, 0, cast(void*)this).sslEnforce();
+		SSL_set_bio(sslHandle, r.bio, w.bio);
+		if (hostname)
+			SSL_set_tlsext_host_name(sslHandle, cast(char*)hostname);
+
+		try
+			initialize();
+		catch (Exception e)
+		{
+			debug(OPENSSL) stderr.writefln("OpenSSL: SSL handshake failed: %s", e.msg);
+			disconnect(e.msg.nonNull, DisconnectType.error);
+			return;
+		}
+	} /// `SSLAdapter` method implementation.
+
+	override void onReadData(Data data)
+	{
+		debug(OPENSSL_DATA) stderr.writefln("OpenSSL: { Got %d incoming bytes from network", data.length);
+
+		if (next.state == ConnectionState.disconnecting || next.state == ConnectionState.disconnected)
+		{
+			return;
+		}
+
+		assert(r.data.length == 0, "Would clobber data");
+		data.enter((contents) { r.set(contents); });
+
+		try
+		{
+			// We must buffer all cleartext data and send it off in a
+			// single `super.onReadData` call. It cannot be split up
+			// into multiple calls, because the `readDataHandler` may
+			// be set to null in the middle of our loop.
+			Data clearText;
+
+			while (true)
+			{
+				static ubyte[4096] buf;
+				debug(OPENSSL_DATA) auto oldLength = r.data.length;
+				auto result = SSL_read(sslHandle, buf.ptr, buf.length);
+				debug(OPENSSL_DATA) stderr.writefln("OpenSSL: < SSL_read ate %d bytes and spat out %d bytes", oldLength - r.data.length, result);
+				if (result > 0)
+				{
+					updateState();
+					clearText ~= buf[0..result];
+				}
+				else
+				{
+					sslError(result, "SSL_read");
+					updateState();
+					break;
+				}
+			}
+			enforce(r.data.length == 0, "SSL did not consume all read data");
+			if (clearText.length)
+				super.onReadData(clearText);
+		}
+		catch (CaughtException e)
+		{
+			debug(OPENSSL) stderr.writeln("Error while %s and processing incoming data: %s".format(next.state, e.msg));
+			if (next.state != ConnectionState.disconnecting && next.state != ConnectionState.disconnected)
+				disconnect(e.msg.nonNull, DisconnectType.error);
+			else
+				throw e;
+		}
+	} /// `SSLAdapter` method implementation.
+
+	override void send(scope Data[] data, int priority = DEFAULT_PRIORITY)
+	{
+		if (state != ConnectionState.connected) assert(false, "Attempting to send to a non-connected socket");
+		while (data.length)
+		{
+			auto datum = data[0];
+			data = data[1 .. $];
+			if (!datum.length)
+				continue;
+
+			debug(OPENSSL_DATA) stderr.writefln("OpenSSL: > Got %d outgoing bytes from program", datum.length);
+
+			debug(OPENSSL_DATA) auto oldLength = w.data.length;
+			int result;
+			datum.enter((scope contents) {
+				result = SSL_write(sslHandle, contents.ptr, contents.length.to!int);
+			});
+			debug(OPENSSL_DATA) stderr.writefln("OpenSSL:   SSL_write ate %d bytes and spat out %d bytes", datum.length, w.data.length - oldLength);
+			if (result > 0)
+			{
+				// "SSL_write() will only return with success, when the
+				// complete contents of buf of length num has been written."
+			}
+			else
+			{
+				sslError(result, "SSL_write");
+				break;
+			}
+		}
+		updateState();
+	} /// ditto
+
+	override @property ConnectionState state()
+	{
+		if (next.state == ConnectionState.connecting)
+			return next.state;
+		return connectionState;
+	} /// ditto
+
+	override void disconnect(string reason, DisconnectType type)
+	{
+		debug(OPENSSL) stderr.writefln("OpenSSL: disconnect called ('%s')", reason);
+		if (sslHandle && !SSL_in_init(sslHandle))
+		{
+			debug(OPENSSL) stderr.writefln("OpenSSL: Calling SSL_shutdown");
+			SSL_shutdown(sslHandle);
+			connectionState = ConnectionState.disconnecting;
+			updateState();
+		}
+		else
+			debug(OPENSSL) stderr.writefln("OpenSSL: In init, not calling SSL_shutdown");
+		debug(OPENSSL) stderr.writefln("OpenSSL: SSL_shutdown done, flushing");
+		debug(OPENSSL) stderr.writefln("OpenSSL: SSL_shutdown output flushed");
+		super.disconnect(reason, type);
+	} /// ditto
+
+	override void onDisconnect(string reason, DisconnectType type)
+	{
+		debug(OPENSSL) stderr.writefln("OpenSSL: onDisconnect ('%s'), calling SSL_free", reason);
+		r.clear();
+		w.clear();
+		SSL_free(sslHandle);
+		sslHandle = null;
+		r = MemoryBIO.init; // Was owned by sslHandle, destroyed by SSL_free
+		w = MemoryBIO.init; // ditto
+		connectionState = ConnectionState.disconnected;
+		debug(OPENSSL) stderr.writeln("OpenSSL: onDisconnect: SSL_free called, calling super.onDisconnect");
+		super.onDisconnect(reason, type);
+		debug(OPENSSL) stderr.writeln("OpenSSL: onDisconnect finished");
+	} /// ditto
+
+	override void setHostName(string hostname, ushort port = 0, string service = null)
+	{
+		this.hostname = cast(char*)hostname.toStringz();
+	} /// ditto
+
+	override OpenSSLCertificate getHostCertificate()
+	{
+		return new OpenSSLCertificate(SSL_get_certificate(sslHandle).sslEnforce());
+	} /// ditto
+
+	override OpenSSLCertificate getPeerCertificate()
+	{
+		return new OpenSSLCertificate(SSL_get_peer_certificate(sslHandle).sslEnforce());
+	} /// ditto
+
+	override string getSNIHostname()
+	{
+		return sniHostname;
+	}
+
+protected:
+	MemoryBIO r; // BIO for incoming ciphertext
+	MemoryBIO w; // BIO for outgoing ciphertext
+
+	private final void initialize()
+	{
+		final switch (context.kind)
+		{
+			case OpenSSLContext.Kind.client: SSL_connect(sslHandle).sslEnforce(); break;
+			case OpenSSLContext.Kind.server: SSL_accept (sslHandle).sslEnforce(); break;
+		}
+		connectionState = ConnectionState.connecting;
+		updateState();
+
+		if (context.verify && hostname && context.kind == OpenSSLContext.Kind.client)
+		{
+			static if (!isOpenSSL11)
+			{
+				import core.stdc.string : strlen;
+				X509_VERIFY_PARAM* param = SSL_get0_param(sslHandle);
+				X509_VERIFY_PARAM_set_hostflags(param, X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS);
+				X509_VERIFY_PARAM_set1_host(param, hostname, strlen(hostname)).sslEnforce("X509_VERIFY_PARAM_set1_host");
+			}
+			else
+			{
+				SSL_set_hostflags(sslHandle, X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS);
+				SSL_set1_host(sslHandle, hostname).sslEnforce("SSL_set1_host");
+			}
+		}
+	}
+
+	protected final void updateState()
+	{
+		// Flush any accumulated outgoing ciphertext to the network
+		if (w.data.length)
+		{
+			debug(OPENSSL_DATA) stderr.writefln("OpenSSL: } Flushing %d outgoing bytes from OpenSSL to network", w.data.length);
+			next.send(Data(w.data));
+			w.clear();
+		}
+
+		// Has the handshake been completed?
+		if (connectionState == ConnectionState.connecting && SSL_is_init_finished(sslHandle))
+		{
+			connectionState = ConnectionState.connected;
+			if (context.verify)
+				try
+					if (!SSL_get_peer_certificate(sslHandle))
+						enforce(context.verify != SSLContext.Verify.require, "No SSL peer certificate was presented");
+					else
+					{
+						auto result = SSL_get_verify_result(sslHandle);
+						enforce(result == X509_V_OK,
+							"SSL peer verification failed with error " ~ result.to!string);
+					}
+				catch (Exception e)
+				{
+					disconnect(e.msg.nonNull, DisconnectType.error);
+					return;
+				}
+			super.onConnect();
+		}
+	}
+
+	alias send = SSLAdapter.send;
+
+	void sslError(int ret, string msg)
+	{
+		auto err = SSL_get_error(sslHandle, ret);
+		debug(OPENSSL) stderr.writefln("OpenSSL: SSL error ('%s', ret %d): %s", msg, ret, err);
+		switch (err)
+		{
+			case SSL_ERROR_WANT_READ:
+			case SSL_ERROR_ZERO_RETURN:
+				return;
+			case SSL_ERROR_SYSCALL:
+				errnoEnforce(false, msg ~ " failed");
+				assert(false);
+			default:
+				sslEnforce(false, "%s failed - error code %s".format(msg, err));
+		}
+	}
+}
+
+/// `SSLCertificate` implementation.
+class OpenSSLCertificate : SSLCertificate
+{
+	X509* x509; /// The C OpenSSL certificate object.
+
+	this(X509* x509)
+	{
+		this.x509 = x509;
+	} ///
+
+	override string getSubjectName()
+	{
+		char[256] buf;
+		X509_NAME_oneline(X509_get_subject_name(x509), buf.ptr, buf.length);
+		buf[$-1] = 0;
+		return buf.ptr.to!string();
+	} /// `SSLCertificate` method implementation.
+}
+
+// ***************************************************************************
+
+/// TODO: replace with custom BIO which hooks into IConnection
+struct MemoryBIO
+{
+	@disable this(this);
+
+	this(const(ubyte)[] data)
+	{
+		bio_ = BIO_new_mem_buf(cast(void*)data.ptr, data.length.to!int);
+	} ///
+
+	void set(scope const(void)[] data)
+	{
+		BUF_MEM *bptr = BUF_MEM_new();
+		if (data.length)
+		{
+			BUF_MEM_grow(bptr, data.length);
+			bptr.data[0..bptr.length] = cast(char[])data;
+		}
+		BIO_set_mem_buf(bio, bptr, BIO_CLOSE);
+	} ///
+
+	void clear() { set(null); } ///
+
+	@property BIO* bio()
+	{
+		if (!bio_)
+		{
+			bio_ = sslEnforce(BIO_new(BIO_s_mem()));
+			BIO_set_close(bio_, BIO_CLOSE);
+		}
+		return bio_;
+	} ///
+
+	const(ubyte)[] data()
+	{
+		BUF_MEM *bptr;
+		BIO_get_mem_ptr(bio, &bptr);
+		return (cast(ubyte*)bptr.data)[0..bptr.length];
+	} ///
+
+private:
+	BIO* bio_;
+}
+
+/// Convert an OpenSSL error into a thrown D exception.
+T sslEnforce(T)(T v, string message = null)
+{
+	if (v)
+		return v;
+
+	{
+		MemoryBIO m;
+		ERR_print_errors(m.bio);
+		string msg = (cast(char[])m.data).idup;
+
+		if (message)
+			msg = message ~ ": " ~ msg;
+
+		throw new Exception(msg);
+	}
+}
+
+// ***************************************************************************
+
+debug(ae_unittest) unittest
+{
+	auto p = new OpenSSLProvider;
+	auto sc = cast(OpenSSLContext) p.createContext(SSLContext.Kind.server);
+	// Use PSK to avoid needing a certificate
+	sc.setPreSharedKey("test", "hunter2".representation);
+	auto s = new TcpServer;
+	s.handleAccept = (TcpConnection c)
+	{
+		auto a = p.createAdapter(sc, c);
+		a.handleReadData = (Data d) {
+			import std.ascii : toUpper;
+			foreach (ref char c; cast(char[])d.mcontents)
+				c = toUpper(c);
+			a.send(d);
+		};
+		s.close(); // One connection
+	};
+	auto port = s.listen(0, "127.0.0.1");
+	auto cc = cast(OpenSSLContext) p.createContext(SSLContext.Kind.client);
+	cc.setPeerVerify(SSLContext.Verify.none);
+	cc.setPreSharedKey("test", "hunter2".representation);
+	auto c = new TcpConnection;
+	auto a = p.createAdapter(cc, c);
+	a.handleConnect = { a.send(Data("hello")); };
+	bool ok;
+	a.handleReadData = (Data d) {
+		assert(cast(string)d.contents == "HELLO");
+		ok = true;
+		a.disconnect();
+	};
+	c.connect("127.0.0.1", port);
+	socketManager.loop();
+	assert(ok);
+}
+
+debug (ae_unittest) import ae.net.ssl.test;
+debug(ae_unittest) unittest { testSSL(new OpenSSLProvider); }
+
+// Test that OpenSSLAdapter.setHostName works after disconnect.
+// Regression test for segfault when setHostName was called with null sslHandle.
+debug(ae_unittest) unittest
+{
+	// Simple mock connection for testing
+	static class MockConnection : IConnection
+	{
+		ConnectionState state_ = ConnectionState.disconnected;
+		@property ConnectionState state() { return state_; }
+		void send(scope Data[] data, int priority = DEFAULT_PRIORITY) {}
+		void disconnect(string reason = defaultDisconnectReason, DisconnectType type = DisconnectType.requested) {}
+		@property void handleConnect(void delegate() handler) {}
+		@property void handleDisconnect(void delegate(string, DisconnectType) handler) {}
+		@property void handleReadData(void delegate(Data) handler) {}
+		@property void handleBufferFlushed(void delegate() handler) {}
+	}
+
+	auto p = new OpenSSLProvider;
+	auto cc = p.createContext(SSLContext.Kind.client);
+	cc.setPeerVerify(SSLContext.Verify.none);
+	auto mockConn = new MockConnection;
+	auto a = cast(OpenSSLAdapter) p.createAdapter(cc, mockConn);
+
+	// Initially sslHandle should be null (created lazily in onConnect)
+	assert(a.sslHandle is null, "sslHandle should be null before onConnect");
+
+	// setHostName should work even with null sslHandle (just stores hostname)
+	a.setHostName("example.com");
+
+	// Simulate connection - this should create the SSL handle
+	mockConn.state_ = ConnectionState.connected;
+	a.onConnect();
+	assert(a.sslHandle !is null, "sslHandle should exist after onConnect");
+
+	// Simulate disconnect - SSL handle should be freed
+	a.onDisconnect("test disconnect", DisconnectType.requested);
+	assert(a.sslHandle is null, "sslHandle should be null after onDisconnect");
+
+	// setHostName should still work after disconnect (this was the bug)
+	a.setHostName("example2.com"); // Would segfault before the fix
+
+	// Simulate reconnection
+	mockConn.state_ = ConnectionState.connected;
+	a.onConnect();
+	assert(a.sslHandle !is null, "sslHandle should be recreated after reconnect");
+}
+
+// Test setCipherSuites: verify the new portable API is reachable and configures the context.
+debug(ae_unittest) unittest
+{
+	auto ctx = new OpenSSLContext(SSLContext.Kind.client);
+	ctx.setCipherSuites(["TLS_AES_256_GCM_SHA384"]);
+}
+
+// Test that the deprecated setCipherList still works at runtime when called via SSLContext
+// base reference (does not hit the base's "not implemented" assert).
+deprecated debug(ae_unittest) unittest
+{
+	SSLContext ctx = new OpenSSLContext(SSLContext.Kind.client);
+	ctx.setCipherList(["HIGH"]); // virtual dispatch must reach OpenSSL impl
+}
+
+deprecated debug(ae_unittest) unittest
+{
+	auto ctx = new OpenSSLContext(SSLContext.Kind.server);
+	static if (isOpenSSL11)
+		SSL_CTX_set_security_level(ctx.sslCtx, 2);
+	ctx.enableDH(4096);
+}
+
+// Test setIdentityFromPKCS12: generate a self-signed cert in-memory and round-trip via PFX.
+debug(ae_unittest) unittest
+{
+	import deimos.openssl.evp : EVP_PKEY, EVP_PKEY_CTX, EVP_PKEY_CTX_new_id, EVP_PKEY_CTX_free,
+		EVP_PKEY_free, EVP_PKEY_keygen_init, EVP_PKEY_keygen, EVP_PKEY_RSA, EVP_sha256;
+	import deimos.openssl.rsa : EVP_PKEY_CTX_set_rsa_keygen_bits;
+	import deimos.openssl.x509 : X509, X509_new, X509_free, X509_set_version, X509_set_pubkey,
+		X509_set_subject_name, X509_set_issuer_name, X509_get_subject_name, X509_get_serialNumber,
+		X509_sign, X509_getm_notBefore, X509_getm_notAfter, X509_gmtime_adj, X509_NAME_add_entry_by_txt;
+	import deimos.openssl.asn1 : ASN1_INTEGER_set;
+	import deimos.openssl.pkcs12 : PKCS12, PKCS12_create, i2d_PKCS12_bio;
+	import deimos.openssl.bio : BIO, BIO_new, BIO_s_mem, BIO_free, BIO_get_mem_ptr, BUF_MEM;
+
+	// Generate a 2048-bit RSA key.
+	auto pkeyCtx = EVP_PKEY_CTX_new_id(EVP_PKEY_RSA, null);
+	assert(pkeyCtx);
+	scope(exit) EVP_PKEY_CTX_free(pkeyCtx);
+	EVP_PKEY_keygen_init(pkeyCtx).sslEnforce();
+	EVP_PKEY_CTX_set_rsa_keygen_bits(pkeyCtx, 2048).sslEnforce();
+	EVP_PKEY* pkey;
+	EVP_PKEY_keygen(pkeyCtx, &pkey).sslEnforce();
+	scope(exit) EVP_PKEY_free(pkey);
+
+	// Create a self-signed X.509 certificate.
+	auto cert = X509_new().sslEnforce();
+	scope(exit) X509_free(cert);
+	X509_set_version(cert, 2).sslEnforce();
+	ASN1_INTEGER_set(X509_get_serialNumber(cert), 1).sslEnforce();
+	X509_gmtime_adj(X509_getm_notBefore(cert), 0).sslEnforce();
+	X509_gmtime_adj(X509_getm_notAfter(cert), 365 * 24 * 3600).sslEnforce();
+	X509_set_pubkey(cert, pkey).sslEnforce();
+	auto name = X509_get_subject_name(cert);
+	X509_NAME_add_entry_by_txt(name, "CN", 0x1001 /*MBSTRING_UTF8*/, cast(const(ubyte)*)"test", -1, -1, 0).sslEnforce();
+	X509_set_issuer_name(cert, name).sslEnforce();
+	X509_sign(cert, pkey, EVP_sha256()).sslEnforce();
+
+	// Pack into PKCS#12.
+	auto p12 = PKCS12_create(cast(char*)"testpass", cast(char*)"test", pkey, cert, null, 0, 0, 0, 0, 0)
+		.sslEnforce();
+	scope(exit) PKCS12_free(p12);
+
+	// Serialize to DER bytes in a memory BIO.
+	auto bio = BIO_new(BIO_s_mem()).sslEnforce();
+	scope(exit) BIO_free(bio);
+	i2d_PKCS12_bio(bio, p12).sslEnforce();
+	BUF_MEM* bptr;
+	BIO_get_mem_ptr(bio, &bptr);
+	auto pfxBytes = (cast(const(ubyte)*) bptr.data)[0 .. bptr.length].dup;
+
+	// Round-trip: load via setIdentityFromPKCS12.
+	auto serverCtx = new OpenSSLContext(SSLContext.Kind.server);
+	serverCtx.setIdentityFromPKCS12(pfxBytes, "testpass");
+}

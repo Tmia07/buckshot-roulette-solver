@@ -1,0 +1,138 @@
+/**
+ * ae.sys.process
+ *
+ * License:
+ *   This Source Code Form is subject to the terms of
+ *   the Mozilla Public License, v. 2.0. If a copy of
+ *   the MPL was not distributed with this file, You
+ *   can obtain one at http://mozilla.org/MPL/2.0/.
+ *
+ * Authors:
+ *   Vladimir Panteleev <ae@cy.md>
+ */
+
+module ae.sys.process;
+
+version (Posix)
+{
+	import core.sys.posix.unistd : getlogin;
+	import std.process : environment;
+	import std.string : fromStringz;
+}
+version (Windows)
+{
+	import core.sys.windows.lmcons : UNLEN;
+	import core.sys.windows.winbase : GetUserNameW;
+	import core.sys.windows.windef : DWORD;
+	import core.sys.windows.winnt : WCHAR;
+	import ae.sys.windows.exception : wenforce;
+	import ae.sys.windows.text : fromWString;
+}
+
+/// Get the name of the user that the current process is running under.
+// Note: Windows does not have numeric user IDs, which is why this
+// cross-platform function always returns a string.
+string getCurrentUser()
+{
+	version (Posix)
+		return environment.get("LOGNAME", cast(string)getlogin().fromStringz);
+	version (Windows)
+	{
+		WCHAR[UNLEN + 1] buf;
+		DWORD len = buf.length;
+		GetUserNameW(buf.ptr, &len).wenforce("GetUserNameW");
+		return buf[].fromWString();
+	}
+}
+
+version (Posix)
+{
+	import ae.net.sync;
+	import ae.sys.signals;
+
+	import std.process;
+
+	/// Asynchronously wait for a process to terminate.
+	void asyncWait(Pid pid, void delegate(int status) dg)
+	{
+		import std.typecons : No;
+		auto anchor = new ThreadAnchor(No.daemon);
+		bool removed;
+
+		void handler() nothrow @nogc
+		{
+			anchor.runAsync(
+				{
+					if (removed)
+					{
+						// Race: another SIGCHLD fired before we could
+						// call removeSignalHandler in the main thread
+						return;
+					}
+
+					// Linux may coalesce multiple SIGCHLD into one, so
+					// we need to explicitly check if our process exited.
+					auto result = tryWait(pid);
+					if (result.terminated)
+					{
+						removed = true;
+						removeSignalHandler(SIGCHLD, &handler);
+						dg(result.status);
+						anchor.close();
+					}
+				});
+		}
+
+		addSignalHandler(SIGCHLD, &handler);
+	}
+
+	debug(ae_unittest) import ae.sys.timing, ae.net.asockets;
+
+	debug(ae_unittest) unittest
+	{
+		string order;
+
+		auto pid = spawnProcess(["sleep", "1"]);
+		asyncWait(pid, (int status) { assert(status == 0); order ~= "b"; });
+		setTimeout({ order ~= "a"; },  500.msecs);
+		setTimeout({ order ~= "c"; }, 1500.msecs);
+		socketManager.loop();
+
+		assert(order == "abc");
+	}
+}
+
+version (Windows)
+{
+	import std.process : Pid, spawnProcess;
+	import ae.net.asockets : WindowsProcessExitWaiter;
+
+	/// Asynchronously wait for a process to terminate.
+	void asyncWait(Pid pid, void delegate(int status) dg)
+	{
+		new WindowsProcessExitWaiter(pid.osHandle, dg);
+	}
+
+	debug(ae_unittest) import ae.sys.timing, ae.net.asockets;
+
+	debug(ae_unittest) unittest
+	{
+		import core.sys.windows.winbase : GetCurrentThreadId;
+
+		auto loopThread = GetCurrentThreadId();
+		int  gotCode    = -1;
+		uint cbThread;
+
+		// "exit 42" as a single /c arg — D quotes each arg, so ["exit","42"]
+		// becomes "exit" "42" which cmd ignores; the single-arg form is correct.
+		auto pid = spawnProcess(["cmd", "/c", "exit 42"]);
+		asyncWait(pid, (int code) {
+			gotCode  = code;
+			cbThread = GetCurrentThreadId();
+		});
+		socketManager.loop();
+
+		assert(gotCode == 42, "expected exit code 42");
+		assert(cbThread == loopThread, "callback ran on wrong thread");
+	}
+}

@@ -1,0 +1,348 @@
+name "ae"
+description "CyberShadow's ArmageddonEngine utilites for almost everything"
+authors "Vladimir Panteleev <vladimir@thecybershadow.net>"
+homepage "https://github.com/CyberShadow/ae"
+license "MPL-2.0"
+targetType "library"
+
+---------------------------
+
+# The main package has no special dependencies.
+
+sourcePaths "sys" "utils" "net"
+importPaths ".."
+
+# In ae:sqlite
+excludedSourceFiles "sys/database.d"
+excludedSourceFiles "sys/sqlite3.d"
+excludedSourceFiles "sys/persistence/keyvalue.d"
+excludedSourceFiles "net/db/sqlite/*"
+
+# In ae:openssl
+excludedSourceFiles "net/ssl/openssl.d"
+
+# In ae:sdl2
+excludedSourceFiles "utils/graphics/sdl2image.d"
+
+# In ae:libpng
+excludedSourceFiles "utils/graphics/libpng.d"
+
+# Needs SDL
+excludedSourceFiles "utils/graphics/sdlimage.d"
+
+# Needs X11
+excludedSourceFiles "sys/sendinput.d"
+excludedSourceFiles "net/x11/*"
+
+# In ae:windows
+excludedSourceFiles "sys/windows/pe/package.d"
+excludedSourceFiles "sys/windows/pe/pe.d"
+excludedSourceFiles "sys/windows/pe/resources.d"
+excludedSourceFiles "sys/windows/pe/versioninfo.d"
+
+# In ae:sys-net-*
+excludedSourceFiles "sys/net/ae.d"
+excludedSourceFiles "sys/net/cachedcurl.d"
+excludedSourceFiles "sys/net/curl.d"
+excludedSourceFiles "sys/net/system.d"
+excludedSourceFiles "sys/net/wininet.d"
+excludedSourceFiles "sys/net/test.d"
+
+# In ae:zlib
+excludedSourceFiles "utils/gzip.d"
+excludedSourceFiles "utils/zlib.d"
+
+# Triggers on import
+excludedSourceFiles "sys/benchmark.d"
+
+# Deprecated
+excludedSourceFiles "sys/vfs_curl.d"
+excludedSourceFiles "utils/meta/misc.d"
+
+# In ae:dyaml
+excludedSourceFiles "utils/serialization/dyaml.d"
+
+# In ae:sdlang
+excludedSourceFiles "utils/serialization/sdlang.d"
+
+# In ae:toml
+excludedSourceFiles "utils/serialization/toml.d"
+
+# In ae:fdtrack
+excludedSourceFiles "sys/fdtrack.d"
+
+# Requires non-standard compiler features
+excludedSourceFiles "utils/alloc.d"
+excludedSourceFiles "utils/container/hashtable.d"
+excludedSourceFiles "utils/container/list.d"
+excludedSourceFiles "utils/container/package.d"
+excludedSourceFiles "utils/xmldom.d"
+
+---------------------------
+
+subPackage {
+	name "zlib"
+	targetType "library"
+
+	# libz (zlib) is a dependency on Phobos, and normally shouldn't be
+	# explicitly specified as required, however in some setups (such as
+	# LDC on Debian) it is not pulled in automatically for whatever
+	# reason.
+	libs "z" platform="posix"
+
+	dependency "ae" version="*" path="."
+	sourceFiles \
+		"utils/gzip.d" \
+		"utils/zlib.d"
+}
+
+---------------------------
+
+subPackage {
+	name "sqlite"
+	targetType "library"
+	libs "sqlite3" platform="posix"
+	systemDependencies "SQLite 3"
+	dependency "ae" version="*" path="."
+	sourceFiles \
+		"sys/database.d" \
+		"sys/sqlite3.d" \
+		"sys/persistence/keyvalue.d" \
+		"net/db/sqlite/package.d"
+}
+
+---------------------------
+
+subPackage {
+	name "openssl"
+	targetType "library"
+	systemDependencies "OpenSSL"
+	dependency "ae" version="*" path="."
+
+	# See the "Compatibility" section of the Deimos-OpenSSL
+        # project for information on how to select a version.
+        dependency "openssl" version=">=3.0.0"
+        importPaths "net" # Silence Dub warning
+
+	sourceFiles \
+		"net/ssl/openssl.d"
+
+	# If you intend to specify the libraries to link against manually, or use SSLUseLib.
+	configuration "lib-none" {
+	}
+
+	# For systems with OpenSSL 1.0.
+	configuration "lib-implicit-1.0" {
+		libs "ssl" "crypto" platform="posix"
+		libs "ssl" "eay" platform="windows-x86"
+		libs "ssleay32" "libeay32" platform="windows-x86_64"
+	}
+
+	# For systems with OpenSSL 1.0 installed alongside some other OpenSSL version.
+	configuration "lib-explicit-1.0" {
+		libs ":libssl.so.1.0.0" ":libcrypto.so.1.0.0" platform="posix"
+		libs "ssl" "eay" platform="windows-x86"
+		libs "ssleay32" "libeay32" platform="windows-x86_64"
+	}
+
+	# For systems with OpenSSL 1.1.
+	configuration "lib-implicit-1.1" {
+		libs "ssl" "crypto"
+	}
+}
+
+---------------------------
+
+subPackage {
+	name "libpng"
+	targetType "library"
+	systemDependencies "libpng"
+	dependency "ae" version="*" path="."
+	dependency "libpng" version="==1.6.17"
+	sourceFiles \
+		"utils/graphics/libpng.d"
+}
+
+---------------------------
+
+subPackage {
+	name "sdl2"
+	targetType "library"
+	systemDependencies "SDL 2"
+	libs "SDL2" "SDL2_image" platform="posix"
+	dependency "ae" version="*" path="."
+	dependency "derelict-sdl2" version="==2.0.2"
+	sourcePaths "ui"
+	importPaths "ui"
+	sourceFiles \
+		"utils/graphics/sdl2image.d"
+	excludedSourceFiles \
+		"ui/*/main.d"
+}
+
+---------------------------
+
+subPackage {
+	name "windows"
+	targetType "library"
+	dependency "ae" version="*" path="."
+        dependency "win32" version="==2.111.0" platform="posix"
+	sourceFiles \
+		"sys/windows/pe/package.d" \
+		"sys/windows/pe/pe.d" \
+		"sys/windows/pe/resources.d" \
+		"sys/windows/pe/versioninfo.d"
+}
+
+---------------------------
+
+subPackage {
+	name "x11"
+        # ae:x11 can't be targetType "library" due to DMD bugs causing linking errors
+	targetType "sourceLibrary"
+	dependency "ae" version="*" path="."
+	dependency "libx11" version="0.0.2"
+	sourceFiles \
+		"sys/sendinput.d" \
+		"net/x11/*"
+}
+
+---------------------------
+
+# These modules provide a unified interface using different network backends.
+# They are self-registering, so, have to be in different Dub packages
+# (as Dub includes all modules whether they are imported or not).
+
+subPackage {
+	name "sys-net-ae"
+	targetType "library"
+	dependency "ae" version="*" path="."
+	sourceFiles "sys/net/ae.d"
+}
+
+subPackage {
+	name "sys-net-cachedcurl"
+	targetType "library"
+	dependency "ae" version="*" path="."
+	sourceFiles "sys/net/cachedcurl.d"
+}
+
+subPackage {
+	name "sys-net-curl"
+	targetType "library"
+	dependency "ae" version="*" path="."
+	sourceFiles "sys/net/curl.d"
+}
+
+subPackage {
+	name "sys-net-system"
+	targetType "library"
+	dependency "ae" version="*" path="."
+	sourceFiles "sys/net/system.d"
+	dependency "ae:sys-net-wininet" version="*" path="." platform="windows"
+	dependency "ae:sys-net-ae" version="*" path="." platform="posix"
+	dependency "ae:openssl" version="*" path="." platform="posix"
+}
+
+subPackage {
+	name "sys-net-wininet"
+	targetType "library"
+	dependency "ae" version="*" path="."
+	sourceFiles "sys/net/wininet.d"
+}
+
+subPackage {
+	name "sys-net-test"
+	targetType "library"
+	dependency "ae" version="*" path="."
+	dependency "ae:sys-net-ae" version="*" path="."
+	dependency "ae:sys-net-curl" version="*" path="."
+	dependency "ae:sys-net-wininet" version="*" path="."
+	dependency "ae:sys-net-cachedcurl" version="*" path="."
+	sourceFiles "sys/net/test.d"
+}
+
+---------------------------
+
+subPackage {
+	name "app-main-posix"
+	targetType "library"
+	dependency "ae" version="*" path="."
+	sourceFiles "ui/app/posix/main.d"
+}
+
+subPackage {
+	name "app-main-windows"
+	targetType "library"
+	dependency "ae" version="*" path="."
+	sourceFiles "ui/app/windows/main.d"
+}
+
+subPackage {
+	name "app-main"
+	targetType "library"
+	sourceFiles "ui/app/main.d"
+	sourceFiles "ui/app/windows/main.d" platform="windows"
+	sourceFiles "ui/app/posix/main.d" platform="posix"
+}
+
+---------------------------
+
+subPackage {
+	name "dyaml"
+	targetType "library"
+	dependency "ae" version="*" path="."
+	dependency "dyaml" version="~>0.10.0"
+	sourceFiles \
+		"utils/serialization/dyaml.d"
+}
+
+---------------------------
+
+subPackage {
+	name "sdlang"
+	targetType "library"
+	dependency "ae" version="*" path="."
+	dependency "sdlang-d" version="~>0.10.0"
+	sourceFiles \
+		"utils/serialization/sdlang.d"
+}
+
+---------------------------
+
+subPackage {
+	name "toml"
+	targetType "library"
+	dependency "ae" version="*" path="."
+	dependency "toml" version="~>2.0.0"
+	sourceFiles \
+		"utils/serialization/toml.d"
+}
+
+---------------------------
+
+# FD tracking subpackage - uses sourceLibrary so that __wrap_* symbols
+# are compiled directly into the depending executable (required for
+# linker --wrap to work).
+subPackage {
+	name "fdtrack"
+	targetType "sourceLibrary"
+	sourceFiles "sys/fdtrack.d"
+
+	# GNU linker --wrap flags to intercept libc calls at link time
+	lflags "--wrap=open" "--wrap=open64" \
+	       "--wrap=openat" "--wrap=openat64" \
+	       "--wrap=creat" "--wrap=creat64" \
+	       "--wrap=fopen" "--wrap=fopen64" \
+	       "--wrap=freopen" "--wrap=freopen64" "--wrap=fclose" \
+	       "--wrap=opendir" "--wrap=fdopendir" "--wrap=closedir" \
+	       "--wrap=socket" "--wrap=close" \
+	       "--wrap=accept" "--wrap=accept4" \
+	       "--wrap=pipe" "--wrap=pipe2" \
+	       "--wrap=dup" "--wrap=dup2" "--wrap=dup3" \
+	       "--wrap=socketpair" \
+	       "--wrap=epoll_create" "--wrap=epoll_create1" \
+	       "--wrap=eventfd" "--wrap=signalfd" "--wrap=timerfd_create" \
+	       "--wrap=inotify_init" "--wrap=inotify_init1" \
+	       platform="linux"
+}

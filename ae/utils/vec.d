@@ -1,0 +1,386 @@
+/**
+ * An std::vector-like type for deterministic lifetime.
+ *
+ * License:
+ *   This Source Code Form is subject to the terms of
+ *   the Mozilla Public License, v. 2.0. If a copy of
+ *   the MPL was not distributed with this file, You
+ *   can obtain one at http://mozilla.org/MPL/2.0/.
+ *
+ * Authors:
+ *   Vladimir Panteleev <ae@cy.md>
+ */
+
+module ae.utils.vec;
+
+import core.lifetime : move, moveEmplace, copyEmplace;
+
+import std.array;
+import std.meta : allSatisfy;
+
+/*
+  An array type with deterministic lifetime.
+
+  Properties:
+  - Owns its data
+  - Not implicitly copyable
+    - Use pointers / `ref` or `opSlice` to avoid copying
+    - Use `.dup` to copy explicitly
+    - Use `std.typecons.RefCounted` for reference counting
+  - If destroyed, will destroy (clobber) its contents
+  - O(1) indexing
+
+  Differences from `std.containers.array.Array`:
+  - Memory-safe
+  - Like D arrays, has an initial null state (distinct from the empty state)
+  - No reference counting
+  - Uses the D GC heap
+  - Separates object lifetime from memory lifetime:
+    the latter is still managed by the GC,
+    so `Vec` is always memory-safe regardless of how you try to (mis-)use it
+
+  Usage notes:
+  - If the type has a destructor, it must be valid to
+    call it on the `.init` value.
+  - `Vec` allows slicing and `ref` access to its members.
+    Due to this, stale pointers do not result in UB;
+    they will simply point to a default value (`.init`).
+*/
+struct Vec(T)
+{
+	private enum elementsHaveDefaultValue = is(typeof({ T t; }));
+	private enum elementsAreCopyable = is(typeof({ T t = void; T u = t; }));
+
+	// Lifetime
+
+	/// Construct from a list or slice of values
+	static if (elementsAreCopyable)
+	this(scope T[] values...)
+	{
+		data = values.dup;
+		cap = data.length;
+	}
+
+	private enum bool isConstituent(C) = is(C == T) || is(C == T[]) || is(C == Vec!T);
+
+	/// Construct from any combination of values, slices of values, or
+	/// other `Vec` instances
+	this(Args...)(auto ref scope Args args)
+	if (allSatisfy!(isConstituent, Args))
+	{
+		size_t length;
+		foreach (ref arg; args)
+			static if (is(typeof(arg) == T))
+				length++;
+			else
+				length += arg.length;
+		data = new T[length];
+		cap = length;
+		size_t p = 0;
+		foreach (ref arg; args)
+			static if (is(typeof(arg) == T))
+				data[p++] = arg;
+			else
+			{
+				static if (is(typeof(arg) == Vec!T))
+					data[p .. p + arg.length] = arg.data[];
+				else
+					data[p .. p + arg.length] = arg[];
+				p += arg.length;
+			}
+	}
+
+	/// To avoid performance pitfalls, implicit copying is disabled.
+	/// Use `.dup` instead.
+	@disable this(this);
+
+	/// Create a shallow copy of this `Vec`.
+	static if (elementsAreCopyable)
+	Vec!T dup()
+	{
+		typeof(return) result;
+		result.data = data.dup;
+		result.cap = result.data.length;
+		return result;
+	}
+
+	~this()
+	{
+		data[] = T.init;
+		data = null;
+		cap = 0;
+	}
+
+	/// Array primitives
+
+	private void ensureCapacity(size_t requiredCapacity)
+	out(; cap >= requiredCapacity)
+	{
+		if (cap < data.length)
+			assert(false, "Array capacity unavailable"); // Alternative is horrible O(n^2) performance
+		if (requiredCapacity > cap)
+		{
+			// Use exponential growth to amortize reallocation cost
+			import std.algorithm.comparison : max;
+			auto growCapacity = max(requiredCapacity, cap + (cap >> 1)); // 1.5x growth
+
+			// Use the GC primitives directly. We don't go through
+			// `.reserve` / `.capacity` because they instantiate
+			// `_d_arraysetcapacity`, which unconditionally instantiates
+			// `__doPostblit!T` and therefore fails to compile for types
+			// with `@disable this(this)`. We also don't want APPENDABLE
+			// since `Vec` tracks length/capacity itself.
+			import core.memory : GC;
+			import std.traits : hasIndirections;
+			version (D_TypeInfo)
+				const(TypeInfo) ti = typeid(T);
+			else
+				const(TypeInfo) ti = null;
+
+			// First, try to grow the existing block in place. This avoids
+			// the move loop and is what GC.extend / .reserve used to do.
+			// Only attempt this when `data.ptr` is at the base of its
+			// block (i.e., `popFront` hasn't advanced it).
+			if (data.ptr !is null && GC.addrOf(data.ptr) is data.ptr)
+			{
+				auto extraMin = (requiredCapacity - cap) * T.sizeof;
+				auto extraDesired = (growCapacity - cap) * T.sizeof;
+				auto newBlockBytes = GC.extend(data.ptr, extraMin, extraDesired, ti);
+				if (newBlockBytes != 0)
+				{
+					cap = newBlockBytes / T.sizeof;
+					assert(cap >= requiredCapacity);
+					return;
+				}
+			}
+
+			// Otherwise, allocate a new block. Claim all the bytes the GC
+			// actually gave us (block sizes are rounded up).
+			uint attrs = 0;
+			static if (!hasIndirections!T)
+				attrs |= GC.BlkAttr.NO_SCAN;
+			auto blk = GC.qalloc(growCapacity * T.sizeof, attrs, ti);
+			cap = blk.size / T.sizeof;
+			assert(cap >= requiredCapacity);
+			T[] newData = (cast(T*) blk.base)[0 .. data.length];
+			foreach (i; 0 .. data.length)
+				moveEmplace(data[i], newData[i]);
+			data = newData;
+		}
+	}
+
+	private T[] extendUninitialized(size_t howMany)
+	out(result; result.length == howMany)
+	{
+		auto oldLength = data.length;
+		auto newLength = oldLength + howMany;
+		assert(cap >= data.length, "Array capacity unavailable");
+		ensureCapacity(newLength);
+		data = data.ptr[0 .. newLength];
+		return data[oldLength .. newLength];
+	}
+
+	@property size_t length() const { return data.length; }
+	alias opDollar = length; /// ditto
+
+	static if (elementsHaveDefaultValue)
+	@property size_t length(size_t newLength)
+	{
+		if (newLength < data.length)
+		{
+			data[newLength .. $] = T.init;
+			data = data[0 .. newLength];
+		}
+		else
+		if (newLength > data.length)
+		{
+			auto oldLength = data.length;
+			ensureCapacity(newLength);
+			data = data.ptr[0 .. newLength];
+			data[oldLength .. newLength] = T.init;
+		}
+		return data.length;
+	} /// ditto
+
+	T opCast(T)() const if (is(T == bool))
+	{
+		return !!data;
+	} /// ditto
+
+	ref inout(T) opIndex(size_t index) inout
+	{
+		return data[index];
+	} /// ditto
+
+	typeof(null) opAssign(typeof(null)) { data[] = T.init; data = null; cap = 0; return null; } /// ditto
+
+	static if (elementsAreCopyable)
+	ref Vec opOpAssign(string op : "~")(scope T[] values...)
+	{
+		foreach (i, ref target; extendUninitialized(values.length))
+			copyEmplace(values[i], target);
+		return this;
+	} /// ditto
+
+	static if (!elementsAreCopyable)
+	ref Vec opOpAssign(string op : "~")(T value)
+	{
+		moveEmplace(value, extendUninitialized(1)[0]);
+		return this;
+	} /// ditto
+
+	/// Range-like primitives
+
+	@property bool empty() const { return !data.length; }
+
+	ref inout(T) front() inout { return data[0]; } /// ditto
+	ref inout(T) back() inout { return data[$-1]; } /// ditto
+
+	void popFront()
+	{
+		data[0] = T.init;
+		data = data[1 .. $];
+		cap--;
+	} /// ditto
+
+	void popBack()
+	{
+		data[$-1] = T.init;
+		data = data[0 .. $-1];
+	} /// ditto
+
+	// Other operations
+
+	/// Return a slice of the held items.
+	/// Ownership is unaffected, so this is a "view" into the contents.
+	/// Can be used to perform range operations and iteration.
+	inout(T)[] opSlice() inout
+	{
+		return data;
+	}
+
+	/// Remove the element with the given `index`, shifting all
+	/// elements after it to the left.
+	void remove(size_t index)
+	{
+		foreach (i; index + 1 .. data.length)
+			move(data[i], data[i - 1]);
+		data = data[0 .. $ - 1];
+	}
+
+private:
+	T[] data;
+	size_t cap;
+}
+
+// Test object lifetime
+debug(ae_unittest) unittest
+{
+	struct S
+	{
+		static int numLive;
+		bool alive;
+		this(bool) { alive = true; numLive++; }
+		this(this) { if (alive) numLive++; }
+		~this() { if (alive) numLive--; }
+	}
+
+	Vec!S v;
+	assert(S.numLive == 0);
+	v = Vec!S(S(true));
+	assert(S.numLive == 1);
+	v ~= S(true);
+	assert(S.numLive == 2);
+	auto v2 = v.dup;
+	assert(S.numLive == 4);
+	v2 = null;
+	assert(S.numLive == 2);
+	v.popFront();
+	assert(S.numLive == 1);
+	v.popBack();
+	assert(S.numLive == 0);
+}
+
+// Test iteration
+debug(ae_unittest) unittest
+{
+	// Ensure iterating twice over a Vec does not consume it.
+	auto v = Vec!int(1, 2, 3);
+	foreach (i; v) {}
+	int sum;
+	foreach (i; v) sum += i;
+	assert(sum == 6);
+}
+
+// Test non-copyable elements
+debug(ae_unittest) unittest
+{
+	struct S
+	{
+		@disable this();
+		@disable this(this);
+		this(int) {}
+	}
+
+	Vec!S v;
+	v ~= S(1);
+}
+
+// Test append after popBack
+debug(ae_unittest) unittest
+{
+	Vec!int v;
+	foreach (i; 0 .. 10)
+		v ~= i;
+	v.popBack();
+	v ~= 42;
+	assert(v.length == 10);
+	assert(v[9] == 42);
+}
+
+// Test append after remove
+debug(ae_unittest) unittest
+{
+	Vec!int v;
+	foreach (i; 0 .. 10)
+		v ~= i;
+	v.remove(5);
+	v ~= 42;
+	assert(v.length == 10);
+}
+
+// Test append after length shrink
+debug(ae_unittest) unittest
+{
+	Vec!int v;
+	foreach (i; 0 .. 10)
+		v ~= i;
+	v.length = 5;
+	v ~= 42;
+	assert(v.length == 6);
+	assert(v[5] == 42);
+}
+
+// Test that the GC's overallocation is captured into `cap`.
+// The smallest GC bin is large enough to hold several `int`s, so a
+// one-element append must report a capacity strictly greater than 1.
+debug(ae_unittest) unittest
+{
+	Vec!int v;
+	v ~= 1;
+	assert(v.cap > v.length, "Vec did not claim the GC block's overallocated capacity");
+}
+
+// Test in-place growth via GC.extend. We allocate a "large" block (well
+// above the GC's small-object size classes) so that the large-object
+// pool has room to extend it in place. The pointer should be stable.
+debug(ae_unittest) unittest
+{
+	Vec!int v;
+	v.length = 64 * 1024; // 256 KiB — large object pool
+	auto oldPtr = &v[0];
+	auto oldCap = v.cap;
+	v.length = oldCap + 1; // force an ensureCapacity call
+	assert(&v[0] is oldPtr, "Vec did not grow in place when the GC could");
+	assert(v.cap > oldCap);
+}
