@@ -33,6 +33,10 @@
     <g id="item-beer"          ><text x="4" y="6" style="font-size: 6px; text-anchor: middle; dominant-baseline: central">🍺</text><title>Beer</title></g>
     <g id="item-cigarettePack" ><text x="4" y="6" style="font-size: 6px; text-anchor: middle; dominant-baseline: central">🚬</text><title>Cigarette Pack</title></g>
     <g id="item-handSaw"       ><text x="4" y="6" style="font-size: 6px; text-anchor: middle; dominant-baseline: central">🪚</text><title>Hand Saw</title></g>
+    <g id="item-inverter"      ><text x="4" y="6" style="font-size: 6px; text-anchor: middle; dominant-baseline: central">🔃</text><title>Inverter</title></g>
+    <g id="item-burnerPhone"   ><text x="4" y="6" style="font-size: 6px; text-anchor: middle; dominant-baseline: central">📱</text><title>Burner Phone</title></g>
+    <g id="item-adrenaline"    ><text x="4" y="6" style="font-size: 6px; text-anchor: middle; dominant-baseline: central">💉</text><title>Adrenaline</title></g>
+    <g id="item-expiredMedicine"><text x="4" y="6" style="font-size: 6px; text-anchor: middle; dominant-baseline: central">💊</text><title>Expired Medicine</title></g>
 
     <g id="bg-shell"   ><rect width="2" height="4" fill="inherit" stroke="inherit" stroke-width="0.5" /></g>
     <g id="shell-blank">

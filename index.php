@@ -12,6 +12,7 @@
 	<?php readfile('board.svg'); ?>
 	<div id="packed-game"></div>
 	<div id="explorer-page">
+		<div id="hidden-state"></div>
 		<table>
 			<tr>
 				<td id="summary">Loading...</td>
@@ -33,7 +34,7 @@
 
 			<ol>
 				<li>
-					<p>Input the game you want to get a solution for by clicking/tapping on the slots.</p>
+					<p>Input the game you want to get a solution for by clicking/tapping on the slots. Clicking an item slot opens a list of items to choose from.</p>
 					<p>Right click / long tap a slot to clear it.</p>
 					<p>You can also use the mouse wheel to quickly cycle through options.</p>
 					<p>Drag items to swap their location.</p>

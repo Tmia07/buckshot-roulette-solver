@@ -23,6 +23,10 @@ enum Move : ubyte
 	useBeer,
 	useCigarettePack,
 	useHandSaw,
+	useInverter,
+	useBurnerPhone,
+	useAdrenaline,
+	useExpiredMedicine,
 }
 
 string[enumLength!Item] itemDescriptions = [
@@ -31,6 +35,10 @@ string[enumLength!Item] itemDescriptions = [
 	"a Beer",
 	"a Cigarette Pack",
 	"a Hand Saw",
+	"an Inverter",
+	"a Burner Phone",
+	"Adrenaline",
+	"Expired Medicine",
 ];
 
 string getMoveDescription(Move move, Character who)
@@ -44,6 +52,10 @@ string getMoveDescription(Move move, Character who)
 		case Move.useBeer         : return "Use a Beer";
 		case Move.useCigarettePack: return "Use a Cigarette Pack";
 		case Move.useHandSaw      : return "Use a Hand Saw";
+		case Move.useInverter      : return "Use an Inverter";
+		case Move.useBurnerPhone   : return "Use a Burner Phone";
+		case Move.useAdrenaline    : return "Use Adrenaline";
+		case Move.useExpiredMedicine: return "Use Expired Medicine";
 	}
 }
 
@@ -52,32 +64,16 @@ enum Score scoreLose = 0;
 enum Score scoreWin = 1;
 enum Score scoreIndeterminate = (scoreLose + scoreWin) / 2;
 
-/// For `Driver.choice`
 enum ChoiceMode
 {
-	/// Something the game would choose at random.
-	/// All odds are equal.
 	random,
-	/// Same as "random", but each item must be a struct with
-	/// a "weight" field, which reflects its relative weight.
-	/// A weight of 0 is allowed, which means that it is only
-	/// relevant if chosen manually by the user in the explorer.
 	randomWeighted,
-	/// Something the player decides,
-	/// so we should pick the best option for the player.
 	best,
-	/// Something a hypothetical perfect opponent would choose.
 	worst,
-	/// Something the game decides in an unpredictable way.
-	/// For calculating the win chance, we treat this
-	/// in the same way as "worst", to be safe.
 	unknown,
-	/// Something that's usually always decided in some way,
-	/// but overridable in interactive mode.
 	first,
 }
 
-/// Helper type constructor for randomWeighted.
 struct Weighted(T, Weight = size_t)
 {
 	T value;
@@ -92,7 +88,6 @@ enum Opponent
 
 Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 {
-	// Ugly hack to work around attribute inference with recursion not working, TODO
 	template Dg(string def, Args...)
 	{
 		enum noGC = is(typeof({ static assert(driver.interactive == false); }));
@@ -101,19 +96,19 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 		else
 			mixin(`alias Dg = ` ~ def ~ `;`);
 	}
-
+	
+	// Спочатку оголошуємо State!
 	struct State
 	{
 		Game game;
 		alias game this;
-
-		// Things that should be in the state (`Game`) but aren't
-		// (because it's relatively inconsequential and will increase the state space too much):
-
-		/// Upper and lower bound, inclusive, of what the initial health is
-		/// (which is also the health that a character can heal up to).
 		ubyte initialHealthMin = 2, initialHealthMax = 4;
 	}
+
+	// Тепер аліаси
+	alias DgMove = Dg!(q{Score delegate(Move)});
+	alias DgItem = Dg!(q{Score delegate(Item)});
+	alias DgHeal = Dg!(q{Score delegate(State, bool)});
 
 	Score resolveCanHealTo(const ref State state0, ubyte targetHealth, scope Dg!q{Score delegate(State newState, bool result)} handler)
 	{
@@ -165,6 +160,24 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 		}
 	}
 
+	/// Bookkeeping after a shell is taken from the (unknown) magazine.
+	static void afterPoolDraw(ref State state)
+	{
+		if (state.dealerPhoneExcluded)
+			state.dealerPhoneExcluded = false; // that was not the revealed shell
+		else
+		if (state.dealerPhoneCandidates)
+			state.dealerPhoneCandidates--; // (approximation: assume it was not the revealed one)
+	}
+
+	static ShellType applyInversion(ref State state, ShellType drawn)
+	{
+		if (!state.chamberInverted)
+			return drawn;
+		state.chamberInverted = false;
+		return drawn == ShellType.blank ? ShellType.live : ShellType.blank;
+	}
+
 	Score resolveRound(const ref State state, scope Dg!q{Score delegate(ShellType shellType, ref State newState)} handler)
 	{
 		if (!state.nextShell.isNull)
@@ -175,9 +188,26 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 			return handler(shellType, newState);
 		}
 
+		if (!state.futureShell.isNull && state.futureShellCountdown == 1)
+		{
+			State newState = state;
+			auto shellType = newState.futureShell.get();
+			newState.futureShell.nullify();
+			newState.futureShellCountdown = 0;
+			newState.shells[shellType]--;
+			afterPoolDraw(newState);
+			auto actualType = applyInversion(newState, shellType);
+			return handler(actualType, newState);
+		}
+
 		Weighted!ShellType[enumLength!ShellType] options;
 		foreach (shellType; ShellType.init .. enumLength!ShellType)
-			options[shellType] = Weighted!ShellType(shellType, state.shells[shellType]);
+		{
+			size_t weight = state.shells[shellType];
+			if (!state.futureShell.isNull && state.futureShell.get() == shellType)
+				weight--;
+			options[shellType] = Weighted!ShellType(shellType, weight);
+		}
 
 		return driver.choice!(ChoiceMode.randomWeighted, Weighted!ShellType)(
 			() => "What shell was in the chamber?",
@@ -186,9 +216,15 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 					return Score.nan;
 				State newState = state;
 				newState.shells[shellType.value]--;
-				return handler(shellType.value, newState);
+				if (!newState.futureShell.isNull)
+					newState.futureShellCountdown--;
+				afterPoolDraw(newState);
+				auto actualType = applyInversion(newState, shellType.value);
+				return handler(actualType, newState);
 			},
-			shellType => ["Blank", "Live"][shellType.value],
+			shellType => state.chamberInverted
+				? ["Live (was blank before the Inverter)", "Blank (was live before the Inverter)"][shellType.value]
+				: ["Blank", "Live"][shellType.value],
 			options
 		);
 	}
@@ -212,7 +248,6 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 			{
 				case ShellType.blank:
 					driver.log(() => "Blank. No damage.");
-					// If the shotgun was aimed at the other player, switch turns
 					if (whom != newState.currentTurn)
 						switchTurn(newState);
 					break;
@@ -288,6 +323,178 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 				state1.shotgunSawedOff = true;
 				driver.log(() => "The shotgun barrel is now sawed off.");
 				return driver.recurse(state1);
+
+			case Item.inverter:
+				if (state1.nextShell.isNull
+					&& !(!state1.futureShell.isNull && state1.futureShellCountdown == 1))
+				{
+					// The chambered shell is unknown: do not reveal it, just remember that it is flipped.
+					state1.chamberInverted = !state1.chamberInverted;
+					driver.log(() => (state1.currentTurn == Character.player ? "You use" : "The dealer uses")
+						~ " the Inverter on the chambered shell. Its type is still unknown, but it is now flipped.");
+					return driver.recurse(state1);
+				}
+				return resolveRound(state1, (ShellType shellType, ref State state2) {
+					auto invertedType = shellType == ShellType.blank ? ShellType.live : ShellType.blank;
+					driver.log(() => (state2.currentTurn == Character.player ? "You use" : "The dealer uses")
+						~ " the Inverter on the chambered shell. It is now " ~ invertedType.to!string ~ ".");
+					state2.nextShell = invertedType;
+					return driver.recurse(state2);
+				});
+
+			case Item.burnerPhone:
+			{
+				if (state1.currentTurn == Character.dealer)
+				{
+					// The player does not hear what the phone told the dealer.
+					if (state1.dealerPhoneCandidates)
+						return Score.nan;
+					auto candidates = state1.shells[].sum - (state1.nextShell.isNull ? 1 : 0);
+					if (candidates < 1)
+						return Score.nan;
+					state1.dealerPhoneCandidates = cast(ubyte)candidates;
+					state1.dealerPhoneExcluded = state1.nextShell.isNull;
+					driver.log(() => "The dealer now knows one of the upcoming shells. You don't know which one or what it is.");
+					return driver.recurse(state1);
+				}
+				if (!state1.futureShell.isNull)
+					return Score.nan;
+				if (state1.shells[].sum < 2)
+					return Score.nan;
+
+				Weighted!ShellType[enumLength!ShellType] typeOptions;
+				foreach (shellType; ShellType.init .. enumLength!ShellType)
+					typeOptions[shellType] = Weighted!ShellType(shellType, state1.shells[shellType]);
+
+				return driver.choice!(ChoiceMode.randomWeighted, Weighted!ShellType)(
+					() => "What is the type of the revealed future shell?",
+					(revealedType) {
+						if (!revealedType.weight)
+							return Score.nan;
+
+						auto maxCountdown = state1.shells[].sum;
+						Weighted!ubyte[maxShells] countdownOptions; size_t numCountdownOptions;
+						foreach (countdown; 2 .. maxCountdown + 1)
+							countdownOptions[numCountdownOptions++] = Weighted!ubyte(cast(ubyte)countdown, 1);
+
+						return driver.choice!(ChoiceMode.randomWeighted, Weighted!ubyte)(
+							() => "How many shells from now is the revealed shell?",
+							(countdown) {
+								if (!countdown.weight)
+									return Score.nan;
+								State state2 = state1;
+								state2.futureShell = revealedType.value;
+								state2.futureShellCountdown = countdown.value;
+								driver.log(() => (state2.currentTurn == Character.player ? "You learn" : "The dealer learns")
+									~ " that the shell " ~ countdown.value.to!string ~ " shells from now is " ~ revealedType.value.to!string ~ ".");
+								return driver.recurse(state2);
+							},
+							countdown => countdown.value.to!string,
+							countdownOptions[0 .. numCountdownOptions],
+						);
+					},
+					shellType => ["Blank", "Live"][shellType.value],
+					typeOptions[]
+				);
+			}
+
+			case Item.adrenaline:
+			{
+				Item[enumLength!Item] stealOptions; size_t numStealOptions;
+				foreach (it; Item.init .. enumLength!Item)
+				{
+					if (it == Item.adrenaline || !state1.items[state1.currentTurn.other][it])
+						continue;
+
+					if (it == Item.handcuffs && state1.handcuffs[state1.currentTurn.other]) continue;
+					if (it == Item.magnifyingGlass && !state1.nextShell.isNull) continue;
+					if (it == Item.handSaw && state1.shotgunSawedOff) continue;
+					if (it == Item.burnerPhone && (state1.currentTurn == Character.dealer
+						? state1.dealerPhoneCandidates || state1.shells[].sum - (state1.nextShell.isNull ? 1 : 0) < 1
+						: !state1.futureShell.isNull || state1.shells[].sum < 2)) continue;
+
+					stealOptions[numStealOptions++] = it;
+				}
+				
+				if (!numStealOptions)
+					return Score.nan;
+
+				scope DgItem afterSteal = cast(DgItem) (Item stolenItem) {
+					State state2 = state1;
+					state2.items[state2.currentTurn.other][stolenItem]--;
+					state2.items[state2.currentTurn][stolenItem]++;
+					driver.log(() => (state2.currentTurn == Character.player ? "You steal " : "The dealer steals ")
+						~ itemDescriptions[stolenItem]
+						~ (state2.currentTurn == Character.player ? " from the dealer and uses it immediately." : " from you and uses it immediately."));
+					return use(state2, stolenItem);
+				};
+
+				if (state1.currentTurn == Character.player)
+					return driver.choice!(ChoiceMode.best, Item)(
+						() => "Which item will you steal?",
+						afterSteal,
+						stolenItem => itemDescriptions[stolenItem],
+						stealOptions[0 .. numStealOptions],
+					);
+				else
+					return driver.choice!(ChoiceMode.worst, Item)(
+						() => "Which item will the dealer steal?",
+						afterSteal,
+						stolenItem => itemDescriptions[stolenItem],
+						stealOptions[0 .. numStealOptions],
+					);
+			}
+
+			case Item.expiredMedicine:
+				return driver.choice!(ChoiceMode.randomWeighted, Weighted!bool)(
+					() => "Does the Expired Medicine work?",
+					(outcome) {
+						if (!outcome.weight)
+							return Score.nan;
+						if (outcome.value)
+						{
+							Score healStep2(State state3, bool canHeal2)
+							{
+								if (canHeal2)
+								{
+									driver.log(() => (state3.currentTurn == Character.player ? "You regain" : "The dealer regains") ~ " another charge.");
+									state3.health[state3.currentTurn]++;
+								}
+								return driver.recurse(state3);
+							}
+							Score healStep1(State state2, bool canHeal1)
+							{
+								if (canHeal1)
+								{
+									driver.log(() => (state2.currentTurn == Character.player ? "You regain" : "The dealer regains") ~ " a charge.");
+									state2.health[state2.currentTurn]++;
+								}
+								return resolveCanHealTo(state2, cast(ubyte)(state2.health[state2.currentTurn] + 1), &healStep2);
+							}
+							driver.log(() => (state1.currentTurn == Character.player ? "The Expired Medicine works! You feel" : "The Expired Medicine works! The dealer feels") ~ " better.");
+							return resolveCanHealTo(state1, cast(ubyte)(state1.health[state1.currentTurn] + 1), &healStep1);
+						}
+						else
+						{
+							State state2 = state1;
+							driver.log(() => (state2.currentTurn == Character.player ? "The Expired Medicine backfires! You lose" : "The Expired Medicine backfires! The dealer loses") ~ " a charge.");
+							state2.health[state2.currentTurn]--;
+							if (state2.health[state2.currentTurn] <= 0)
+								final switch (state2.currentTurn)
+								{
+									case Character.player:
+										driver.log(() => "You are out. You lose!");
+										return driver.gameOver(false);
+									case Character.dealer:
+										driver.log(() => "The dealer is out. You win!");
+										return driver.gameOver(true);
+								}
+							return driver.recurse(state2);
+						}
+					},
+					outcome => outcome.value ? "Works (+2 charges)" : "Backfires (-1 charge)",
+					Weighted!bool(true, 2), Weighted!bool(false, 3) 
+				);
 		}
 	}
 
@@ -302,6 +509,10 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 			case Move.useBeer: return use(state, Item.beer);
 			case Move.useCigarettePack: return use(state, Item.cigarettePack);
 			case Move.useHandSaw: return use(state, Item.handSaw);
+			case Move.useInverter: return use(state, Item.inverter);
+			case Move.useBurnerPhone: return use(state, Item.burnerPhone);
+			case Move.useAdrenaline: return use(state, Item.adrenaline);
+			case Move.useExpiredMedicine: return use(state, Item.expiredMedicine);
 		}
 	}
 
@@ -309,7 +520,6 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 
 	if (state0.totalShells == 0)
 	{
-		// Handcuffs come off. How will you grab the items otherwise?
 		foreach (Character character, handcuffState; state0.handcuffs)
 			if (handcuffState)
 			{
@@ -319,7 +529,6 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 				return driver.recurse(state1);
 			}
 
-		// It's always the player's turn first.
 		if (state0.currentTurn != Character.player)
 		{
 			State state1 = state0;
@@ -328,18 +537,12 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 			return driver.recurse(state1);
 		}
 
-		// End of round.
 		driver.log(() => "Starting new round.");
 
 		State state1 = state0;
 
-		// Use a different flow depending on if the driver is interactive.
-		// If yes, use a series of questions suitable for interactive use (humans).
-		// If no, use a more efficient flow with fewer questions.
-		// The result should be the same.
 		if (driver.interactive)
 		{
-			// Ask questions in the order that the game presents information to players.
 			enum Phase
 			{
 				itemsConfig,
@@ -355,17 +558,7 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 			{
 				State state;
 				alias state this;
-
 				Phase phase;
-
-				// The player gets between 0 and 4 items.  The dealer gets the same amount.
-				// We want to ask questions in the order that the game asks them...
-				// but it gets complicated because:
-				// 1. The item number distribution should be linear,
-				//    but the number of granted items can't be known until the end
-				// 2. Characters can run out of inventory space
-				//    (so the total number of items may not even be knowable...)
-				// These track the lower and upper bound (inclusive):
 				size_t numItemsLow, numItemsHigh;
 				size_t[enumLength!Character] itemIndex;
 			}
@@ -411,12 +604,9 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 						if (itemsSoFar == state2.numItemsHigh)
 							return nextPhase(state2);
 
-						// Some slightly hairy math, in order to fairly represent the linear
-						// distribution of number of granted items without asking additional questions:
 						size_t noItemChanceNumerator, noItemChanceDenominator;
 						if (itemsSoFar < state2.numItemsLow)
 						{
-							// We *know* an item will be granted.
 							noItemChanceNumerator = 0;
 							noItemChanceDenominator = 1;
 						}
@@ -432,7 +622,6 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 						{
 							if (character == Character.player)
 							{
-								// Same as below, except "false" instead of null and "true" instead of non-null.
 								Weighted!bool[2] options = [
 									{ false, itemNotGrantedWeight },
 									{ true , itemGrantedWeight    },
@@ -462,7 +651,6 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 							}
 							else
 							{
-								// I guess we'll never know.
 								return nextPhase(state2);
 							}
 						}
@@ -518,7 +706,6 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 							options[]
 						);
 
-					// Note, this could also be done by making 0 HP representable...
 					case Phase.charges:
 						return driver.choice!(ChoiceMode.first, ubyte)(
 							() => "Reset charges?",
@@ -540,7 +727,7 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 							() => "How many shells are loaded?",
 							(totalShells) {
 								AskState state3 = state2;
-								auto liveShells = cast(ubyte)(totalShells / 2); // rounding down
+								auto liveShells = cast(ubyte)(totalShells / 2);
 								auto blankShells = cast(ubyte)(totalShells - liveShells);
 								driver.log(() => blankShells.to!string ~ " blank, " ~ liveShells.to!string ~ " live.");
 								state3.shells[ShellType.blank] = blankShells;
@@ -560,18 +747,16 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 			return ask(askState);
 		}
 		else
-			// Refill magazine.
 			return driver.choice!(ChoiceMode.random, ubyte)(
 				() => "How many shells are loaded?",
 				(totalShells) {
 					State state2 = state1;
-					auto liveShells = cast(ubyte)(totalShells / 2); // rounding down
+					auto liveShells = cast(ubyte)(totalShells / 2); 
 					auto blankShells = cast(ubyte)(totalShells - liveShells);
 					driver.log(() => blankShells.to!string ~ " blank, " ~ liveShells.to!string ~ " live.");
 					state2.shells[ShellType.blank] = blankShells;
 					state2.shells[ShellType.live] = liveShells;
 
-					// Grant items
 					return driver.choice!(ChoiceMode.random, ubyte)(
 						() => "How many items are granted?",
 						(numItems) {
@@ -580,8 +765,6 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 							{
 								if (character == enumLength!Character)
 								{
-									// Done granting items.
-
 									driver.log(() => "Round begins.");
 									return driver.recurse(state3);
 								}
@@ -605,8 +788,8 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 										static foreach (numCigarettePacksCT; 0 .. 2 + 1)
 											if (numCigarettePacksCT == state3.items[character][Item.cigarettePack])
 											{
-												alias PackedItems = ubyte;
-												alias ItemCNS = CNS!(/*PackedItems*/uint, /*Item*/ubyte, grantedItemsCT, enumLength!Item, true, true);
+												alias PackedItems = ushort;
+												alias ItemCNS = CNS!(uint, ubyte, grantedItemsCT, enumLength!Item, true, true);
 												static assert(ItemCNS.packedCard <= PackedItems.max);
 
 												Weighted!PackedItems[ItemCNS.packedCard] genItemChoiceTable()
@@ -615,13 +798,12 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 													foreach (PackedItems packedItems, ref option; result)
 														option.value = packedItems;
 
-													/*Item*/ubyte[grantedItemsCT] items;
+													ubyte[grantedItemsCT] items;
 													void iterate(size_t itemIndex, int remainingCigarettePacks)
 													{
 														if (itemIndex == grantedItemsCT)
 														{
-															// `dup` for https://issues.dlang.org/show_bug.cgi?id=24354
-															/*Item*/ubyte[grantedItemsCT] sortedItems = items.dup;
+															ubyte[grantedItemsCT] sortedItems = items.dup;
 															sortedItems[].sort();
 															auto packedItems = cast(PackedItems)ItemCNS.pack(sortedItems);
 															result[packedItems].weight++;
@@ -678,13 +860,45 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 
 	assert(!state0.handcuffs[state0.currentTurn]);
 
+	// The dealer's turn: is the chambered shell the one the dealer saw on their Burner Phone?
+	if (state0.currentTurn == Character.dealer
+		&& state0.dealerPhoneCandidates && !state0.dealerPhoneExcluded
+		&& state0.nextShell.isNull)
+	{
+		size_t n = state0.dealerPhoneCandidates;
+		return driver.choice!(ChoiceMode.randomWeighted, Weighted!bool)(
+			() => "Is the chambered shell the one the dealer learned about with the Burner Phone?",
+			(isIt) {
+				if (!isIt.weight)
+					return Score.nan;
+				State state1 = state0;
+				if (!isIt.value)
+				{
+					state1.dealerPhoneExcluded = true;
+					state1.dealerPhoneCandidates--;
+					if (!state1.dealerPhoneCandidates)
+						state1.dealerPhoneExcluded = false;
+					return driver.recurse(state1);
+				}
+				state1.dealerPhoneCandidates = 0;
+				state1.dealerPhoneExcluded = false;
+				return resolveRound(state1, (ShellType shellType, ref State state2) {
+					driver.log(() => "The dealer knows that the chambered shell is " ~ shellType.to!string ~ ".");
+					state2.nextShell = shellType;
+					return driver.recurse(state2);
+				});
+			},
+			isIt => isIt.value ? "Yes (the dealer knows this shell)" : "No",
+			Weighted!bool(true, 1), Weighted!bool(false, n - 1),
+		);
+	}
+
 	final switch (state0.currentTurn)
 	{
 		case Character.player:
-			// Assume that the player will proceed according to what's best for them.
 			return driver.choice!(ChoiceMode.best, Move)(
 				() => "What will you do?",
-				move => tryMove(state0, move),
+				cast(DgMove) (Move move) => tryMove(state0, move),
 				move => getMoveDescription(move, Character.player),
 				EnumMembers!Move,
 			);
@@ -695,7 +909,7 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 				case Opponent.perfect:
 					return driver.choice!(ChoiceMode.worst, Move)(
 						() => "What does the dealer do?",
-						move => tryMove(state0, move),
+						cast(DgMove) (Move move) => tryMove(state0, move),
 						move => getMoveDescription(move, Character.dealer),
 						EnumMembers!Move,
 					);
@@ -717,15 +931,12 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 							);
 						}
 
-
-						// Simulate game AI
 						Nullable!Character dealerTarget;
 						Nullable!ShellType knownShell;
 						bool dealerKnowsShell;
 
 						if (!state1.nextShell.isNull)
 						{
-							// If it's resolved, it's guaranteed that the current character knows it
 							knownShell = state1.nextShell;
 							dealerTarget = knownShell.get() == ShellType.live
 								? Character.player
@@ -735,7 +946,7 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 
 						if (state1.totalShells == 1)
 						{
-							knownShell = state1.shells[ShellType.live]
+							knownShell = (state1.shells[ShellType.live] != 0) != state1.chamberInverted
 								? ShellType.live
 								: ShellType.blank;
 							dealerTarget = knownShell.get() == ShellType.live
@@ -744,9 +955,6 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 							dealerKnowsShell = true;
 						}
 
-						// The real AI actually iterates over items using a hidden internal order
-						// (order that items were acquired).
-						// To be safe, assume an order which is most inconvenient for us.
 						Move[enumLength!Item] itemOptions; size_t numItemOptions;
 						if (state1.items[state1.currentTurn][Item.magnifyingGlass] && !dealerKnowsShell && state1.totalShells != 1)
 							itemOptions[numItemOptions++] = Move.useMagnifyingGlass;
@@ -758,17 +966,37 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 							itemOptions[numItemOptions++] = Move.useHandcuffs;
 						if (state1.items[state1.currentTurn][Item.handSaw] && !state1.shotgunSawedOff && knownShell == ShellType.live.nullable)
 							itemOptions[numItemOptions++] = Move.useHandSaw;
+						if (state1.items[state1.currentTurn][Item.inverter] && knownShell == ShellType.blank.nullable && state1.totalShells != 1)
+							itemOptions[numItemOptions++] = Move.useInverter;
+						if (state1.items[state1.currentTurn][Item.burnerPhone] && !dealerKnowsShell && !state1.dealerPhoneCandidates && state1.shells[].sum >= 2)
+							itemOptions[numItemOptions++] = Move.useBurnerPhone;
+						if (state1.items[state1.currentTurn][Item.expiredMedicine] && dealerCanHeal
+							&& (state1.health[state1.currentTurn] <= 1 || !state1.items[state1.currentTurn][Item.cigarettePack]))
+							itemOptions[numItemOptions++] = Move.useExpiredMedicine;
+						
+						if (state1.items[state1.currentTurn][Item.adrenaline] && (
+							   (state1.items[state1.currentTurn.other][Item.magnifyingGlass] && !dealerKnowsShell && state1.totalShells != 1)
+							|| (state1.items[state1.currentTurn.other][Item.cigarettePack] && dealerCanHeal)
+							|| (state1.items[state1.currentTurn.other][Item.beer] && knownShell != ShellType.live.nullable && state1.totalShells != 1)
+							|| (state1.items[state1.currentTurn.other][Item.handcuffs] && state1.handcuffs[state1.currentTurn.other] == HandcuffState.none && state1.totalShells != 1)
+							|| (state1.items[state1.currentTurn.other][Item.handSaw] && !state1.shotgunSawedOff && knownShell == ShellType.live.nullable)
+							|| (state1.items[state1.currentTurn.other][Item.inverter] && knownShell == ShellType.blank.nullable && state1.totalShells != 1)
+							|| (state1.items[state1.currentTurn.other][Item.burnerPhone] && !dealerKnowsShell && !state1.dealerPhoneCandidates && state1.shells[].sum >= 2)
+							|| (state1.items[state1.currentTurn.other][Item.expiredMedicine] && dealerCanHeal && state1.health[state1.currentTurn] <= 1)
+						))
+							itemOptions[numItemOptions++] = Move.useAdrenaline;
+
 						if (numItemOptions)
 							return driver.choice!(ChoiceMode.unknown, Move)(
 								() => "The dealer will use an item...",
-								move => tryMove(state1, move),
+								cast(DgMove) (Move move) => tryMove(state1, move),
 								move => getMoveDescription(move, Character.dealer),
 								itemOptions[0 .. numItemOptions]
 							);
 
 						if (state1.items[state1.currentTurn][Item.handSaw] && !state1.shotgunSawedOff && knownShell != nullable(ShellType.blank))
 							return coinFlip!Move(
-								move => tryMove(state1, move),
+								cast(DgMove) (Move move) => tryMove(state1, move),
 								move => getMoveDescription(move, Character.dealer),
 								Move.shootSelf, Move.useHandSaw,
 							);
@@ -778,7 +1006,7 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 
 						if (dealerTarget.isNull)
 							return coinFlip!Move(
-								move => tryMove(state1, move),
+								cast(DgMove) (Move move) => tryMove(state1, move),
 								move => getMoveDescription(move, Character.dealer),
 								Move.shootSelf, Move.shootOther,
 							);
@@ -789,9 +1017,8 @@ Score expand(Driver)(const ref Game game, Driver driver, Opponent opponent)
 						}
 					}
 
-					// Resolve if dealer can heal here
 					if (state0.items[state0.currentTurn][Item.cigarettePack])
-						return resolveCanHealTo(state0, cast(ubyte)(state0.health[state0.currentTurn] + 1), (State state1, bool result) { return dealerAI(state1, result); });
+						return resolveCanHealTo(state0, cast(ubyte)(state0.health[state0.currentTurn] + 1), cast(DgHeal) (State state1, bool result) { return dealerAI(state1, result); });
 					else
 						return dealerAI(state0, false);
 			}
@@ -805,17 +1032,10 @@ unittest
 	{
 		enum interactive = false;
 
-		/// Make a note.
 		void log(scope string delegate() message) nothrow @nogc {}
 
-		/// Recursive search.
-		/// Get the score of another game state,
-		/// as if we descended recursively into it.
 		Score recurse(const ref Game game) nothrow @nogc { assert(false); }
 
-		/// A choice is happening.
-		/// Filter out NaNs!
-		/// Caller should be careful to not mutate external state in `getScore`!
 		Score choice(ChoiceMode mode, T)(
 			scope string delegate() description,
 			scope Score delegate(T) nothrow @nogc getScore,
@@ -823,7 +1043,6 @@ unittest
 			scope const(T)[] items...
 		) nothrow @nogc { assert(false); }
 
-		/// End condition.
 		Score gameOver(bool playerWon) nothrow @nogc { return playerWon ? scoreWin : scoreLose; }
 	}
 
@@ -833,7 +1052,6 @@ unittest
 		expand(game, driver, Opponent.game);
 }
 
-/// Standard `Driver.choice` implementation.
 template graphChoice(alias GetScore)
 {
 	Score graphChoice(ChoiceMode mode, T)(
@@ -881,7 +1099,7 @@ template graphChoice(alias GetScore)
 			foreach (item; items)
 			{
 				auto itemScore = getScore(item);
-				if (itemScore > bestScore) // Comparison with NaN will yield false
+				if (itemScore > bestScore) 
 					bestScore = itemScore;
 			}
 			assert(bestScore != -Score.max, "All choices are invalid");
@@ -893,7 +1111,7 @@ template graphChoice(alias GetScore)
 			foreach (item; items)
 			{
 				auto itemScore = getScore(item);
-				if (itemScore < worstScore) // Comparison with NaN will yield false
+				if (itemScore < worstScore) 
 					worstScore = itemScore;
 			}
 			assert(worstScore != Score.max, "All choices are invalid");

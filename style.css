@@ -132,3 +132,43 @@ ul, ol {
 	padding-inline-start: 2em;
 }
 h3 { text-align: center; }
+
+/* Briefly highlight the choice that was just changed */
+@keyframes flash { from { background-color: #ffe680; } to { background-color: transparent; } }
+#explorer tr.flash > td { animation: flash 1.5s ease-out; }
+
+/* Item picker */
+#picker {
+	position: fixed;
+	z-index: 10;
+	display: flex;
+	flex-direction: column;
+	background: white;
+	color: black;
+	border: 0.21em solid black;
+	box-shadow: 0 0.3em 1em rgba(0, 0, 0, 0.5);
+	font-size: 16px;
+	max-height: 90vh;
+	overflow-y: auto;
+}
+#picker > button {
+	font-size: inherit;
+	text-align: left;
+	background: none;
+	border: none;
+	padding: 0.35em 0.8em;
+	cursor: pointer;
+	white-space: nowrap;
+}
+#picker > button:hover { background: #ddd; }
+#picker > button.selected { background: #ffe680; font-weight: bold; }
+
+#hidden-state {
+	display: none;
+	margin: 1em 0 0;
+	padding: 0.5em 1em;
+	background: #fff3c4;
+	color: black;
+	border: 0.21em solid black;
+}
+#hidden-state button { font-size: inherit; cursor: pointer; }

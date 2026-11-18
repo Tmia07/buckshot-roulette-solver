@@ -32,7 +32,14 @@ enum packedItemCard = 1 + enumLength!Item; // add 1 for "empty"
 alias PackedItemsBase = ushort;
 static immutable itemBinomials = BinomialCoefficientTable!(PackedItemsBase, packedItemCard + maxItems, maxItems).generate();
 alias ItemCNS = CNS!(PackedItemsBase, PackedItem, maxItems, packedItemCard, /*lexicographic:*/false, /*multiset:*/true, itemBinomials);
-enum packedItemsCard = 1287; // == multisetCoefficient(packedItemCard, maxItems) == ItemCNS.packedCard
+// multisetCoefficient(packedItemCard, maxItems) == C(packedItemCard + maxItems - 1, maxItems).
+// With the original 5 item types, packedItemCard was 6, giving C(13,8) == 1287.
+// With 9 item types (Inverter, Burner Phone, Adrenaline, Expired Medicine added),
+// packedItemCard is 10, giving C(17,8) == 24310. This MUST be kept in sync with
+// enumLength!Item; if you add/remove items, recompute this (e.g. via
+// `math.comb(packedItemCard + maxItems - 1, maxItems)` in Python) and update it here.
+enum packedItemsCard = 24310; // == multisetCoefficient(packedItemCard, maxItems) == ItemCNS.packedCard
+static assert(packedItemsCard == ItemCNS.packedCard, "packedItemsCard is out of sync with ItemCNS.packedCard - update the hardcoded value above");
 alias PackedItems = WithMax!(PackedItemsBase, packedItemsCard - 1);
 
 alias PackedHealth = WithMax!(ubyte, 3); // min == 1 !
@@ -52,6 +59,27 @@ immutable Nullable!ShellType[enumLength!PackedNextShell] packedNextShell = [
 	ShellType.live.nullable,
 ];
 
+// Burner Phone's pending reveal: either nothing pending (index 0), or a shell
+// type plus how many undetermined draws remain before it comes up (1 .. maxShells).
+// Packed as: 0 = none; otherwise 1 + shellType * maxShells + (countdown - 1).
+enum packedFutureShellCard = 1 + enumLength!ShellType * maxShells;
+alias PackedFutureShell = WithMax!(ubyte, packedFutureShellCard - 1);
+
+PackedFutureShell packFutureShell(Nullable!ShellType shell, ubyte countdown) nothrow @nogc
+{
+	if (shell.isNull)
+		return PackedFutureShell(cast(PrePackedGameField)0);
+	return PackedFutureShell(cast(PrePackedGameField)(1 + shell.get() * maxShells + (countdown - 1)));
+}
+
+Tuple!(Nullable!ShellType, "shell", ubyte, "countdown") unpackFutureShell(PackedFutureShell packed) nothrow @nogc
+{
+	if (packed == 0)
+		return typeof(return)(Nullable!ShellType.init, cast(ubyte)0);
+	auto v = packed.value - 1;
+	return typeof(return)((cast(ShellType)(v / maxShells)).nullable, cast(ubyte)(v % maxShells + 1));
+}
+
 struct PrePackedGame
 {
 	Character currentTurn;
@@ -62,7 +90,11 @@ struct PrePackedGame
 	PackedHealth[enumLength!Character] health;
 	PackedHandcuffState handcuffs;
 	PackedNextShell nextShell;
+	PackedFutureShell futureShell;
 	bool shotgunSawedOff;
+	bool chamberInverted;
+	WithMax!(ubyte, maxShells) dealerPhoneCandidates;
+	bool dealerPhoneExcluded;
 
 	static PackedItems packItems(byte[enumLength!Item] items) nothrow @nogc
 	{
@@ -98,7 +130,11 @@ struct PrePackedGame
 			game.handcuffs[game.currentTurn.other]
 		].staticArray);
 		this.nextShell = cast(PackedNextShell)packedNextShell.indexOf(game.nextShell);
+		this.futureShell = packFutureShell(game.futureShell, game.futureShellCountdown);
 		this.shotgunSawedOff = game.shotgunSawedOff;
+		this.chamberInverted = game.chamberInverted;
+		this.dealerPhoneCandidates = game.dealerPhoneCandidates;
+		this.dealerPhoneExcluded = game.dealerPhoneExcluded;
 	}
 
 	Game unpack() nothrow @nogc
@@ -111,7 +147,15 @@ struct PrePackedGame
 		game.handcuffs[game.currentTurn      ] = packedHandcuffStates[this.handcuffs][0];
 		game.handcuffs[game.currentTurn.other] = packedHandcuffStates[this.handcuffs][1];
 		game.nextShell = packedNextShell[this.nextShell];
+		{
+			auto f = unpackFutureShell(this.futureShell);
+			game.futureShell = f.shell;
+			game.futureShellCountdown = f.countdown;
+		}
 		game.shotgunSawedOff = this.shotgunSawedOff;
+		game.chamberInverted = this.chamberInverted;
+		game.dealerPhoneCandidates = this.dealerPhoneCandidates;
+		game.dealerPhoneExcluded = this.dealerPhoneExcluded;
 		return game;
 	}
 }

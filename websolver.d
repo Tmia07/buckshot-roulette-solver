@@ -26,6 +26,7 @@ import expand;
 import graph;
 import packing;
 import remotegraph;
+import localscores;
 
 mixin SSLUseLib;
 
@@ -48,6 +49,11 @@ struct JSGame
 	ubyte[enumLength!Character] health = [1, 1];
 	Nullable!HandcuffState[enumLength!Character] handcuffs; // `null` <=> `HandcuffState.none`
 	bool shotgunSawedOff;
+	@JSONOptional Nullable!ShellType futureShell; // Burner Phone reveal
+	@JSONOptional ubyte futureShellCountdown;
+	@JSONOptional bool chamberInverted; // see `Game.chamberInverted`
+	@JSONOptional ubyte dealerPhoneCandidates;
+	@JSONOptional bool dealerPhoneExcluded;
 
 	/// Convert `Game` to `JSGame`, trying to not move
 	/// things around too much (compared to `reference`).
@@ -84,6 +90,11 @@ struct JSGame
 				this.handcuffs[character] = game.handcuffs[character].HandcuffState.nullable;
 
 		this.shotgunSawedOff = game.shotgunSawedOff;
+		this.futureShell = game.futureShell;
+		this.futureShellCountdown = game.futureShell.isNull ? 0 : game.futureShellCountdown;
+		this.chamberInverted = game.chamberInverted;
+		this.dealerPhoneCandidates = game.dealerPhoneCandidates;
+		this.dealerPhoneExcluded = game.dealerPhoneExcluded;
 
 		assert(this.toGame(false) == game);
 	}
@@ -147,6 +158,21 @@ struct JSGame
 				["handcuffs-" ~ text(ubyte(game.currentTurn)), "handle"]
 			);
 		game.shotgunSawedOff = this.shotgunSawedOff;
+		if (!this.futureShell.isNull)
+		{
+			if (strict && (this.futureShellCountdown < 1 || this.futureShellCountdown > maxShells))
+				throw new JSGameError("Invalid future shell countdown.", ["shell-next"]);
+			game.futureShell = this.futureShell;
+			game.futureShellCountdown = this.futureShellCountdown;
+		}
+		// A known chambered shell cannot be "invertedly unknown".
+		game.chamberInverted = this.chamberInverted && this.nextShell.isNull && game.totalShells > 0;
+		if (this.dealerPhoneCandidates && game.totalShells > 1)
+		{
+			auto maxCandidates = game.shells[].sum - (game.nextShell.isNull ? 1 : 0);
+			game.dealerPhoneCandidates = cast(ubyte)min(this.dealerPhoneCandidates, maxCandidates);
+			game.dealerPhoneExcluded = this.dealerPhoneExcluded && game.nextShell.isNull && game.dealerPhoneCandidates;
+		}
 		return game;
 	}
 }
@@ -252,6 +278,11 @@ struct Driver(Scores)
 		auto graphScore = scores[packedGame].unpackScore;
 		assert(interactive);
 
+		static if (is(Scores == LocalScores))
+			if (LocalScores.isRoundStart(game))
+				throw new JSGameError("No shells loaded. Enter the shells for this round.",
+					maxShells.iota.map!(shellIndex => "shell-" ~ text(shellIndex)).array);
+
 		JSAnalysis.Event event;
 		size_t eventIndex = analysis.events.length;
 		analysis.events ~= event;
@@ -271,6 +302,14 @@ struct Driver(Scores)
 		auto graphScore = scores[packedGame].unpackScore;
 		if (!interactive)
 			return graphScore;
+
+		static if (is(Scores == LocalScores))
+			if (LocalScores.isRoundStart(game))
+			{
+				// Do not try to explore every possible next round - there are far too many.
+				log(() => "The round is over. Enter the new round's shells and items to continue the analysis.");
+				return graphScore;
+			}
 
 		auto jsGame = JSGame(game, recursedGames[$-1]);
 		recursedGames ~= jsGame;
@@ -494,11 +533,68 @@ void main(string[] args)
 		JSAnalysis analysis;
 		if (local)
 		{
-			chdir(args[0].realPath().dirName());
-			auto scoreData = mapFile(scoreFileName(problem.opponent), MmMode.read);
-			auto scores = scoreData.asDataOf!PackedScore.unsafeContents;
-
-			analysis = analyze(problem, scores);
+			// chdir(args[0].realPath().dirName());
+			chdir(thisExePath.dirName);
+			auto fn = scoreFileName(problem.opponent);
+			if (fn.exists)
+			{
+				auto scoreData = mapFile(fn, MmMode.read);
+				auto scores = scoreData.asDataOf!PackedScore.unsafeContents;
+				analysis = analyze(problem, scores);
+			}
+			else
+			{
+				// Deep recursion - run on a thread with a large stack.
+				import core.thread : Thread;
+				import core.time : MonoTime, seconds;
+				auto scores = new LocalScores(problem.opponent);
+				new Thread({
+					// Iterative deepening: look further ahead until the result
+					// is exact or the time budget runs out.
+					enum timeBudget = 8.seconds;
+					scores.deadline = MonoTime.currTime + timeBudget;
+					bool haveResult, exact;
+					uint depthReached;
+					for (uint depth = 2; depth <= 64; depth += 2)
+					{
+						scores.reset(depth);
+						try
+						{
+							auto a = analyze(problem, scores);
+							analysis = a;
+							haveResult = true;
+							depthReached = depth;
+							if (scores.cutoffs == 0)
+							{
+								exact = true;
+								break;
+							}
+						}
+						catch (SearchBudgetExceeded)
+							break;
+					}
+					if (!haveResult)
+					{
+						// Even the shallowest search did not fit - estimate everything from health.
+						scores.deadline = MonoTime.currTime + timeBudget;
+						scores.maxStates = size_t.max;
+						scores.reset(0);
+						try
+							analysis = analyze(problem, scores);
+						catch (SearchBudgetExceeded)
+							throw new Exception("This position is too complex to analyze in time.");
+						depthReached = 0;
+					}
+					if (!exact && analysis.validationError.message is null)
+					{
+						JSAnalysis.Event event;
+						event.message = "Approximate analysis: the position is too complex, so the solver looked "
+							~ depthReached.text ~ " actions ahead (time limit " ~ timeBudget.total!"seconds".text
+							~ " s) and estimated the rest from health.";
+						analysis.events ~= event;
+					}
+				}, 1024 * 1024 * 1024).start().join();
+			}
 		}
 		else
 		{

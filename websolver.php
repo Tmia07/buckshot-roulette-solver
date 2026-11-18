@@ -1,11 +1,13 @@
 <?php
+set_time_limit(120); // the solver itself stops after ~8-16 s
 
 $descriptor_spec = [
     0 => ['pipe', 'r'],
     1 => ['pipe', 'w'],
 ];
 
-$process = proc_open(array('./websolver'), $descriptor_spec, $pipes);
+$solver = __DIR__ . DIRECTORY_SEPARATOR . 'websolver' . (PHP_OS_FAMILY === 'Windows' ? '.exe' : '');
+$process = proc_open(array($solver), $descriptor_spec, $pipes, __DIR__);
 
 header('Content-Type: application/json');
 if (is_resource($process)) {

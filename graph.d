@@ -7,10 +7,9 @@ import std.math.rounding;
 import std.parallelism;
 import std.range;
 import std.stdio : File, stderr;
-
 import ae.sys.data;
 import ae.sys.datamm;
-import ae.sys.file : truncate, atomic, atomicExchange;
+import ae.sys.file : truncate, atomic;
 import ae.utils.meta;
 import ae.utils.text;
 
@@ -143,7 +142,7 @@ void generateScoreFile(Opponent opponent)
 			// sawCRC[crc] = true;
 		}
 
-		atomicExchange(fn, nextFn);
+		import std.file : rename; rename(fn, nextFn);
 	}
 	stderr.writeln("Change threshold reached.");
 }

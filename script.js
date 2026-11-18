@@ -6,6 +6,8 @@ const defaultGame = {
 		[null, null, null, null, null, null, null, null]
 	],
 	nextShell: null,
+	futureShell: null, // Додано для Телефону
+	futureShellCountdown: 0, // Додано для Телефону
 	health: [2, 2],
 	handcuffs: [null, null],
 	shotgunSawedOff: false,
@@ -21,9 +23,31 @@ function showGame(game) {
 	document.body.classList.toggle('packed-game', typeof game === 'string');
 	if (typeof game === 'string')
 		document.getElementById('packed-game').textContent = 'Game #' + game;
-	else
+	else {
 		for (let func of showGameFuncs)
 			func(game);
+		showHiddenState(game);
+	}
+}
+
+function showHiddenState(game) {
+	const box = document.getElementById('hidden-state');
+	const lines = [];
+	if (game.chamberInverted)
+		lines.push(['chamberInverted', '🔃 The chambered shell was flipped with an Inverter (its type is unknown).']);
+	if (game.dealerPhoneCandidates)
+		lines.push(['dealerPhoneCandidates', '📱 The dealer knows one of the upcoming shells (from their Burner Phone).']);
+	box.replaceChildren(...lines.map(([key, text]) => {
+		const clear = node('BUTTON', { type: 'button', title: 'Forget this' }, '✖');
+		clear.addEventListener('click', () => {
+			delete currentGame[key];
+			if (key === 'dealerPhoneCandidates')
+				delete currentGame.dealerPhoneExcluded;
+			handleGameEdit(true);
+		});
+		return node('DIV', {}, [text + ' ', clear]);
+	}));
+	box.style.display = lines.length ? 'block' : 'none';
 }
 
 function copyGame(game) { return JSON.parse(JSON.stringify(game)); }
@@ -141,7 +165,7 @@ function addAnalysis(problem, data) {
 				event.choice.mode == 'unknown' ? '❓' :
 				event.choice.mode == 'first' ? '❓' :
 				'';
-			addEvent(icon,
+			const choiceRow = addEvent(icon,
 					 event.choice.description,
 					 event.choice.score);
 			for (let i = 0; i < event.choice.options.length; i++) {
@@ -162,6 +186,14 @@ function addAnalysis(problem, data) {
 					description,
 				]);
 				radio.addEventListener('change', function() {
+					// Remember where the changed choice is on screen, so that the view
+					// does not jump around after the analysis is recalculated.
+					const ep = document.getElementById('explorer-page');
+					const rows = [...explorerHeader.parentElement.children];
+					scrollAnchor = {
+						rowIndex: rows.indexOf(choiceRow),
+						offset: choiceRow.getBoundingClientRect().top - ep.getBoundingClientRect().top,
+					};
 					const problem = {
 						opponent: origProblem.opponent,
 						game: data.game,
@@ -181,6 +213,8 @@ function addAnalysis(problem, data) {
 			addEvent(event.gameOver ? '✌️' : '💀', 'Game over.', event.gameOver ? 1 : 0);
 		}
 	}
+
+	restoreScrollAnchor(explorerHeader.parentElement);
 
 	document.getElementById('summary').replaceChildren(node(
 		'DIV', {}, [
@@ -213,6 +247,29 @@ function addAnalysis(problem, data) {
 			}
 		})()),
 	));
+}
+
+let scrollAnchor = null;
+
+function restoreScrollAnchor(table) {
+	const ep = document.getElementById('explorer-page');
+	table.style.marginBottom = '';
+	if (!scrollAnchor)
+		return;
+	const anchor = scrollAnchor;
+	scrollAnchor = null;
+	const row = table.children[anchor.rowIndex];
+	if (!row)
+		return;
+	let delta = row.getBoundingClientRect().top - ep.getBoundingClientRect().top - anchor.offset;
+	// If the new line of play is shorter, add space below so the row can stay in place.
+	const maxScroll = ep.scrollHeight - ep.clientHeight;
+	if (ep.scrollTop + delta > maxScroll)
+		table.style.marginBottom = (ep.scrollTop + delta - maxScroll) + 'px';
+	ep.scrollTop += delta;
+	row.classList.remove('flash');
+	void row.offsetWidth; // restart animation
+	row.classList.add('flash');
 }
 
 let stateVersion = 0;
@@ -333,6 +390,55 @@ function handleGameEdit(now) {
 }
 
 
+// ----- Item picker (a list instead of cycling through values)
+
+function itemLabel(type, value) {
+	if (value === null)
+		return { icon: '✖️', name: 'Empty' };
+	const def = document.getElementById(type + '-' + value);
+	return {
+		icon: def && def.querySelector('text') ? def.querySelector('text').textContent : '',
+		name: def && def.querySelector('title') ? def.querySelector('title').textContent : value,
+	};
+}
+
+function closePicker() {
+	const old = document.getElementById('picker');
+	if (old)
+		old.remove();
+}
+
+function openPicker(event, labels, selectedIndex, onPick) {
+	closePicker();
+	const picker = node('DIV', { id: 'picker' });
+	labels.forEach((label, index) => {
+		const button = node('BUTTON', { type: 'button' }, [
+			node('SPAN', { class: 'emoji' }, label.icon),
+			' ' + label.name,
+		]);
+		if (index === selectedIndex)
+			button.classList.add('selected');
+		button.addEventListener('click', e => {
+			e.stopPropagation();
+			closePicker();
+			onPick(index);
+		});
+		picker.appendChild(button);
+	});
+	document.body.appendChild(picker);
+	// Position near the cursor, but keep it inside the window.
+	const w = picker.offsetWidth, h = picker.offsetHeight;
+	picker.style.left = Math.max(4, Math.min(event.clientX, window.innerWidth - w - 4)) + 'px';
+	picker.style.top = Math.max(4, Math.min(event.clientY, window.innerHeight - h - 4)) + 'px';
+}
+
+document.addEventListener('pointerdown', e => {
+	const picker = document.getElementById('picker');
+	if (picker && !picker.contains(e.target))
+		closePicker();
+}, true);
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closePicker(); });
+
 // Note: The HTML drag and drop API (dragstart / dragover / drop) does not work on SVG elements.
 
 var dragging = false;
@@ -438,7 +544,13 @@ document.addEventListener('DOMContentLoaded', function() {
 
 		slotNode.addEventListener('click', function(event) {
 			if (!dragging && event.button == 0) {
-				cycleValue(currentGame, index => index + 1);
+				if (type === 'item')
+					openPicker(event, values.map(v => itemLabel(type, v)), values.indexOf(getValue(currentGame)), index => {
+						setValue(currentGame, values[index]);
+						handleGameEdit(true);
+					});
+				else
+					cycleValue(currentGame, index => index + 1);
 				event.preventDefault();
 			}
 		});
@@ -505,11 +617,11 @@ document.addEventListener('DOMContentLoaded', function() {
 	for (let i = 0; i < defaultGame.shells.length; i++)
 		addControl('shell', i, ['shells', i], [null, 'blank', 'live'], [null, 'blank', 'live']);
 	addControl('shell', 'next', ['nextShell'], [null, 'blank', 'live'], ['unknown', 'blank', 'live']);
-	for (let c = 0; c < defaultGame.items.length; c++)
+for (let c = 0; c < defaultGame.items.length; c++)
 		for (let i = 0; i < defaultGame.items[c].length; i++)
 			addControl('item', c + '-' + i, ['items', c, i],
-					   [null, 'magnifyingGlass', 'handcuffs', 'beer', 'cigarettePack', 'handSaw'],
-					   [null, 'magnifyingGlass', 'handcuffs', 'beer', 'cigarettePack', 'handSaw']);
+					   [null, 'magnifyingGlass', 'handcuffs', 'beer', 'cigarettePack', 'handSaw', 'inverter', 'burnerPhone', 'adrenaline', 'expiredMedicine'],
+					   [null, 'magnifyingGlass', 'handcuffs', 'beer', 'cigarettePack', 'handSaw', 'inverter', 'burnerPhone', 'adrenaline', 'expiredMedicine']);
 	for (let c = 0; c < defaultGame.health.length; c++)
 		addControl('health', c, ['health', c], [4, 3, 2, 1], ['4', '3', '2', '1']);
 	for (let c = 0; c < defaultGame.handcuffs.length; c++)
