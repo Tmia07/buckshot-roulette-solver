@@ -819,6 +819,15 @@ template CustomDeserializer(alias Transform, alias anchor)
 					throw new Exception("Can't parse %s from %s".format(T.stringof, "null"));
 			}
 			else
+			static if (is(T X == Nullable!X))
+			{
+				// Non-null value for a Nullable: deserialize the payload type.
+				T tv;
+				auto s = makeSink!T(&tv);
+				s.handle(v);
+				handleValue(tv);
+			}
+			else
 			static if (isProtocolBoolean!V)
 			{
 				static if (is(T : bool))
